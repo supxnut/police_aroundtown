@@ -1,0 +1,11 @@
+# Dockerfile for Police Sync Bot
+FROM node:20-alpine
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm install
+
+COPY . .
+
+CMD ["npx", "tsx", "discord-bot/bot.ts"]
