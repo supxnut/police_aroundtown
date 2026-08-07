@@ -1,34 +1,108 @@
+import pg from 'pg';
+import mysql from 'mysql2/promise';
 import initSqlJs, { Database } from 'sql.js';
 import path from 'path';
 import fs from 'fs';
 
-// Database storage setup using WASM-based SQLite engine (sql.js) for cross-platform compatibility
-const dbPath = path.join(process.cwd(), 'police_mdt.sqlite');
-let db: Database | null = null;
+let dbDriver: 'postgres' | 'mysql' | 'sqlite' = 'sqlite';
+let pgPool: pg.Pool | null = null;
+let mysqlPool: mysql.Pool | null = null;
+let sqliteDb: Database | null = null;
 
-function saveDb() {
-  if (db) {
+const dbPath = path.join(process.cwd(), 'police_mdt.sqlite');
+
+function saveSqliteDb() {
+  if (sqliteDb && dbDriver === 'sqlite') {
     try {
-      const data = db.export();
+      const data = sqliteDb.export();
       const buffer = Buffer.from(data);
       fs.writeFileSync(dbPath, buffer);
     } catch (e) {
-      console.error("Error saving SQLite database file:", e);
+      console.error('[Database] Error saving SQLite database file:', e);
     }
   }
 }
 
-// Helper function to execute query returning promise
-export const query = (sql: string, params: any[] = []): Promise<any> => {
+// Convert ? placeholders to $1, $2... for PostgreSQL
+function convertSqlToPg(sql: string): { formattedSql: string; isInsert: boolean } {
+  let paramCount = 0;
+  let formattedSql = sql.replace(/\?/g, () => {
+    paramCount++;
+    return `$${paramCount}`;
+  });
+
+  formattedSql = formattedSql
+    .replace(/AUTOINCREMENT/gi, 'SERIAL')
+    .replace(/AUTO_INCREMENT/gi, 'SERIAL')
+    .replace(/strftime\('%H:%M',\s*([^)]+)\)/gi, "to_char($1, 'HH24:MI')");
+
+  const trimmed = formattedSql.trim().toLowerCase();
+  const isInsert = trimmed.startsWith('insert');
+
+  if (isInsert && !/returning/i.test(formattedSql)) {
+    formattedSql += ' RETURNING id';
+  }
+
+  return { formattedSql, isInsert };
+}
+
+// Universal query runner supporting PostgreSQL, MySQL, and SQLite
+export const query = async (sql: string, params: any[] = []): Promise<any> => {
+  const sanitizedParams = params.map((p) => (p === undefined ? null : p));
+
+  if (dbDriver === 'postgres' && pgPool) {
+    try {
+      const { formattedSql, isInsert } = convertSqlToPg(sql);
+      const trimmed = sql.trim().toLowerCase();
+      const isSelect =
+        trimmed.startsWith('select') ||
+        trimmed.startsWith('pragma') ||
+        trimmed.startsWith('show') ||
+        trimmed.startsWith('with');
+
+      const res = await pgPool.query(formattedSql, sanitizedParams);
+
+      if (isSelect) {
+        return res.rows;
+      } else {
+        let insertId = 0;
+        if (isInsert && res.rows && res.rows.length > 0 && res.rows[0].id) {
+          insertId = Number(res.rows[0].id);
+        }
+        return { insertId, affectedRows: res.rowCount || 0 };
+      }
+    } catch (err) {
+      console.error('[Database] PostgreSQL Query Error:', err, 'SQL:', sql);
+      throw err;
+    }
+  }
+
+  if (dbDriver === 'mysql' && mysqlPool) {
+    try {
+      const [rows] = await mysqlPool.query(sql, sanitizedParams);
+      if (Array.isArray(rows)) {
+        return rows;
+      } else {
+        const result = rows as any;
+        return {
+          insertId: result.insertId || 0,
+          affectedRows: result.affectedRows || 0,
+        };
+      }
+    } catch (err) {
+      console.error('[Database] MySQL Query Error:', err, 'SQL:', sql);
+      throw err;
+    }
+  }
+
+  // Fallback: SQLite via sql.js
   return new Promise((resolve, reject) => {
-    if (!db) {
-      return reject(new Error("Database not initialized"));
+    if (!sqliteDb) {
+      return reject(new Error('SQLite Database not initialized'));
     }
 
     try {
       const trimmed = sql.trim().toLowerCase();
-      
-      // Replace MySQL specific syntax for SQLite compatibility
       let adjustedSql = sql
         .replace(/AUTO_INCREMENT/gi, 'AUTOINCREMENT')
         .replace(/TINYINT\(1\)/gi, 'INTEGER')
@@ -38,10 +112,8 @@ export const query = (sql: string, params: any[] = []): Promise<any> => {
         .replace(/COLLATE=utf8mb4_unicode_ci/gi, '')
         .replace(/TIMESTAMP DEFAULT CURRENT_TIMESTAMP/gi, 'DATETIME DEFAULT CURRENT_TIMESTAMP');
 
-      const sanitizedParams = params.map(p => p === undefined ? null : p);
-
       if (trimmed.startsWith('select') || trimmed.startsWith('pragma') || trimmed.startsWith('show')) {
-        const stmt = db.prepare(adjustedSql);
+        const stmt = sqliteDb.prepare(adjustedSql);
         if (sanitizedParams.length > 0) {
           stmt.bind(sanitizedParams);
         }
@@ -52,27 +124,27 @@ export const query = (sql: string, params: any[] = []): Promise<any> => {
         stmt.free();
         resolve(rows);
       } else {
-        const stmt = db.prepare(adjustedSql);
+        const stmt = sqliteDb.prepare(adjustedSql);
         if (sanitizedParams.length > 0) {
           stmt.bind(sanitizedParams);
         }
         stmt.step();
         stmt.free();
 
-        const changes = db.getRowsModified();
+        const changes = sqliteDb.getRowsModified();
         let insertId = 0;
         try {
-          const res = db.exec("SELECT last_insert_rowid() as id");
+          const res = sqliteDb.exec('SELECT last_insert_rowid() as id');
           if (res.length > 0 && res[0].values.length > 0) {
             insertId = res[0].values[0][0] as number;
           }
         } catch (_) {}
 
-        saveDb();
+        saveSqliteDb();
         resolve({ insertId, affectedRows: changes });
       }
     } catch (err) {
-      console.error("SQL Execution Error:", err, "SQL:", sql);
+      console.error('[Database] SQLite Query Error:', err, 'SQL:', sql);
       reject(err);
     }
   });
@@ -83,295 +155,338 @@ export const queryOne = async (sql: string, params: any[] = []): Promise<any> =>
   return Array.isArray(rows) && rows.length > 0 ? rows[0] : null;
 };
 
-// Initialize database schema and seeds on startup
+// Initialize database connection & schemas
 export const initDB = async (): Promise<void> => {
-  const SQL = await initSqlJs();
+  const dbUrl =
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.PGDATABASE_URL ||
+    process.env.MYSQL_URL ||
+    '';
 
-  let isCorrupted = false;
-  let loadedDb: Database | null = null;
+  const isPgEnv = Boolean(dbUrl.startsWith('postgres') || process.env.PGHOST || process.env.POSTGRES_HOST);
+  const isMysqlEnv = Boolean(dbUrl.startsWith('mysql') || process.env.MYSQLHOST || process.env.MYSQL_HOST);
 
-  if (fs.existsSync(dbPath)) {
-    console.log('[Database] Existing database found.');
+  let connected = false;
+
+  if (isPgEnv) {
     try {
-      const fileBuffer = fs.readFileSync(dbPath);
-      loadedDb = new SQL.Database(fileBuffer);
-      loadedDb.exec("PRAGMA integrity_check;");
-      loadedDb.exec("SELECT count(*) FROM sqlite_master;");
-    } catch (err) {
-      isCorrupted = true;
+      console.log('[Database] Connecting to Persistent PostgreSQL database...');
+      pgPool = new pg.Pool({
+        connectionString: dbUrl || undefined,
+        host: process.env.PGHOST,
+        port: process.env.PGPORT ? Number(process.env.PGPORT) : undefined,
+        user: process.env.PGUSER,
+        password: process.env.PGPASSWORD,
+        database: process.env.PGDATABASE,
+        ssl: process.env.PGSSLMODE === 'disable' ? false : { rejectUnauthorized: false },
+        max: 20,
+        connectionTimeoutMillis: 5000,
+      });
+
+      // Test connectivity
+      await pgPool.query('SELECT 1');
+      dbDriver = 'postgres';
+      connected = true;
+      console.log('[Database] Connected to PostgreSQL database successfully.');
+    } catch (err: any) {
+      console.warn(`[Database] Could not connect to PostgreSQL (${err.message || err}). Falling back to local database engine.`);
+      if (pgPool) {
+        try { await pgPool.end(); } catch (_) {}
+        pgPool = null;
+      }
     }
   }
 
-  if (fs.existsSync(dbPath) && isCorrupted) {
-    console.log('[Database] Database corrupted.');
-    console.log('[Database] Backing up corrupted database...');
-    const timestamp = Date.now();
-    const corruptedPath = path.join(process.cwd(), `database-corrupted-${timestamp}.db`);
+  if (!connected && isMysqlEnv) {
     try {
-      if (loadedDb) {
-        try { loadedDb.close(); } catch (_) {}
-        loadedDb = null;
+      console.log('[Database] Connecting to Persistent MySQL database...');
+      if (dbUrl) {
+        mysqlPool = mysql.createPool(dbUrl);
+      } else {
+        mysqlPool = mysql.createPool({
+          host: process.env.MYSQLHOST || process.env.MYSQL_HOST || 'localhost',
+          port: Number(process.env.MYSQLPORT || process.env.MYSQL_PORT || 3306),
+          user: process.env.MYSQLUSER || process.env.MYSQL_USER || 'root',
+          password: process.env.MYSQLPASSWORD || process.env.MYSQL_PASSWORD || '',
+          database: process.env.MYSQLDATABASE || process.env.MYSQL_DATABASE || 'police_mdt',
+          waitForConnections: true,
+          connectionLimit: 10,
+        });
       }
-      fs.renameSync(dbPath, corruptedPath);
-    } catch (_) {
+
+      await mysqlPool.query('SELECT 1');
+      dbDriver = 'mysql';
+      connected = true;
+      console.log('[Database] Connected to MySQL database successfully.');
+    } catch (err: any) {
+      console.warn(`[Database] Could not connect to MySQL (${err.message || err}). Falling back to local database engine.`);
+      mysqlPool = null;
+    }
+  }
+
+  if (!connected) {
+    dbDriver = 'sqlite';
+    console.log('[Database] Using Local SQLite engine fallback...');
+    const SQL = await initSqlJs();
+    if (fs.existsSync(dbPath)) {
       try {
-        fs.copyFileSync(dbPath, corruptedPath);
-        fs.unlinkSync(dbPath);
-      } catch (_) {}
+        const fileBuffer = fs.readFileSync(dbPath);
+        sqliteDb = new SQL.Database(fileBuffer);
+      } catch (_) {
+        sqliteDb = new SQL.Database();
+      }
+    } else {
+      sqliteDb = new SQL.Database();
     }
-    console.log('[Database] Creating new database...');
-    db = new SQL.Database();
-  } else if (!fs.existsSync(dbPath)) {
-    console.log('[Database] Creating new database...');
-    db = new SQL.Database();
-  } else {
-    db = loadedDb;
   }
 
-  try {
-    setupSchema(db!);
-  } catch (err: any) {
-    console.log('[Database] Database corrupted.');
-    console.log('[Database] Backing up corrupted database...');
-    const timestamp = Date.now();
-    const corruptedPath = path.join(process.cwd(), `database-corrupted-${timestamp}.db`);
-    try {
-      if (db) {
-        try { db.close(); } catch (_) {}
-      }
-      if (fs.existsSync(dbPath)) {
-        fs.renameSync(dbPath, corruptedPath);
-      }
-    } catch (_) {}
-    console.log('[Database] Creating new database...');
-    db = new SQL.Database();
-    setupSchema(db);
-  }
-
-  saveDb();
-  console.log('[Database] Database initialized successfully.');
+  await setupTables();
+  console.log(`[Database] Engine initialized successfully [Driver: ${dbDriver}]. Existing data preserved.`);
 };
 
-function setupSchema(targetDb: Database) {
-  // Create users table
-  targetDb.run(`
+// Create tables safely if they do not exist (Migration / Auto Schema Init)
+async function setupTables() {
+  const isPg = dbDriver === 'postgres';
+  const autoInc = isPg ? 'SERIAL PRIMARY KEY' : 'INTEGER PRIMARY KEY AUTO_INCREMENT';
+  const textType = 'TEXT';
+  const datetimeType = isPg ? 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP' : 'DATETIME DEFAULT CURRENT_TIMESTAMP';
+
+  // 1. Users / Officers table
+  await executeSchemaQuery(`
     CREATE TABLE IF NOT EXISTS users (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      discord_id TEXT NOT NULL UNIQUE,
-      fullname TEXT NOT NULL,
-      rank TEXT NOT NULL DEFAULT 'Cadet',
-      start_date TEXT NOT NULL,
-      avatar TEXT DEFAULT 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
-      active INTEGER NOT NULL DEFAULT 1,
-      total_hours REAL DEFAULT 0.0,
-      total_cases INTEGER DEFAULT 0,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      id ${autoInc},
+      discord_id VARCHAR(255) NOT NULL UNIQUE,
+      fullname VARCHAR(255) NOT NULL,
+      rank VARCHAR(255) NOT NULL DEFAULT 'Cadet',
+      start_date VARCHAR(255) NOT NULL,
+      avatar ${textType} DEFAULT 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150',
+      active INT NOT NULL DEFAULT 1,
+      total_hours NUMERIC DEFAULT 0.0,
+      total_cases INT DEFAULT 0,
+      created_at ${datetimeType}
     )
   `);
 
-  try { targetDb.run("ALTER TABLE users ADD COLUMN total_hours REAL DEFAULT 0.0"); } catch (_) {}
-  try { targetDb.run("ALTER TABLE users ADD COLUMN total_cases INTEGER DEFAULT 0"); } catch (_) {}
-
-  // Create duty_logs table
-  targetDb.run(`
+  // 2. Duty logs / Attendance logs
+  await executeSchemaQuery(`
     CREATE TABLE IF NOT EXISTS duty_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL,
-      date TEXT NOT NULL,
-      start_time TEXT NOT NULL,
-      end_time TEXT NOT NULL,
-      hours REAL NOT NULL DEFAULT 0.00,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      id ${autoInc},
+      user_id INT NOT NULL,
+      date VARCHAR(255) NOT NULL,
+      start_time VARCHAR(255) NOT NULL,
+      end_time VARCHAR(255) NOT NULL,
+      hours NUMERIC NOT NULL DEFAULT 0.00,
+      created_at ${datetimeType}
     )
   `);
 
-  // Create cases table
-  targetDb.run(`
+  // 3. Cases / Case logs
+  await executeSchemaQuery(`
     CREATE TABLE IF NOT EXISTS cases (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      case_number TEXT NOT NULL UNIQUE,
-      title TEXT NOT NULL,
-      description TEXT,
-      suspect_name TEXT DEFAULT 'Unknown',
-      officer_in_charge TEXT DEFAULT 'Unassigned',
-      status TEXT NOT NULL DEFAULT 'open',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      id ${autoInc},
+      case_number VARCHAR(255) NOT NULL UNIQUE,
+      title ${textType} NOT NULL,
+      description ${textType},
+      suspect_name VARCHAR(255) DEFAULT 'Unknown',
+      officer_in_charge VARCHAR(255) DEFAULT 'Unassigned',
+      status VARCHAR(255) NOT NULL DEFAULT 'open',
+      reporter_name VARCHAR(255) DEFAULT 'ไม่ระบุ',
+      officer_discord_id VARCHAR(255) DEFAULT '',
+      officer_rank VARCHAR(255) DEFAULT '',
+      received_time VARCHAR(255) DEFAULT '',
+      closed_time VARCHAR(255) DEFAULT '',
+      duration VARCHAR(255) DEFAULT '',
+      assistant_officer VARCHAR(255) DEFAULT 'ไม่มี',
+      case_type VARCHAR(255) DEFAULT 'คดีปกติ',
+      officer_avatar ${textType} DEFAULT '',
+      helpers ${textType} DEFAULT '[]',
+      image ${textType} DEFAULT '',
+      discord_message_id VARCHAR(255) DEFAULT '',
+      guild_id VARCHAR(255) DEFAULT '',
+      created_at ${datetimeType},
+      updated_at ${datetimeType}
     )
   `);
 
-  try { targetDb.run("ALTER TABLE cases ADD COLUMN reporter_name TEXT DEFAULT 'ไม่ระบุ'"); } catch (_) {}
-  try { targetDb.run("ALTER TABLE cases ADD COLUMN officer_discord_id TEXT DEFAULT ''"); } catch (_) {}
-  try { targetDb.run("ALTER TABLE cases ADD COLUMN officer_rank TEXT DEFAULT ''"); } catch (_) {}
-  try { targetDb.run("ALTER TABLE cases ADD COLUMN received_time TEXT DEFAULT ''"); } catch (_) {}
-  try { targetDb.run("ALTER TABLE cases ADD COLUMN closed_time TEXT DEFAULT ''"); } catch (_) {}
-  try { targetDb.run("ALTER TABLE cases ADD COLUMN duration TEXT DEFAULT ''"); } catch (_) {}
-  try { targetDb.run("ALTER TABLE cases ADD COLUMN assistant_officer TEXT DEFAULT 'ไม่มี'"); } catch (_) {}
-  try { targetDb.run("ALTER TABLE cases ADD COLUMN case_type TEXT DEFAULT 'คดีปกติ'"); } catch (_) {}
-  try { targetDb.run("ALTER TABLE cases ADD COLUMN officer_avatar TEXT DEFAULT ''"); } catch (_) {}
-  try { targetDb.run("ALTER TABLE cases ADD COLUMN helpers TEXT DEFAULT '[]'"); } catch (_) {}
-  try { targetDb.run("ALTER TABLE cases ADD COLUMN image TEXT DEFAULT ''"); } catch (_) {}
-  try { targetDb.run("ALTER TABLE cases ADD COLUMN discord_message_id TEXT DEFAULT ''"); } catch (_) {}
-  try { targetDb.run("ALTER TABLE cases ADD COLUMN guild_id TEXT DEFAULT ''"); } catch (_) {}
-  try { targetDb.run("ALTER TABLE cases ADD COLUMN updated_at DATETIME"); } catch (_) {}
-
-  // Create activities table
-  targetDb.run(`
+  // 4. Activities
+  await executeSchemaQuery(`
     CREATE TABLE IF NOT EXISTS activities (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT NOT NULL,
-      description TEXT NOT NULL,
-      reward TEXT NOT NULL,
-      image TEXT DEFAULT 'https://images.unsplash.com/photo-1508847154043-be5407fcaa5a?w=600',
-      question TEXT DEFAULT 'โปรดโหวตหรือตอบคำถามสำหรับกิจกรรมนี้',
-      options TEXT DEFAULT '["เห็นด้วย / เข้าร่วม", "ไม่เห็นด้วย / ไม่สะดวก", "ข้อเสนอแนะเพิ่มเติม"]',
-      start_date TEXT NOT NULL,
-      end_date TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'active',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      id ${autoInc},
+      title ${textType} NOT NULL,
+      description ${textType} NOT NULL,
+      reward VARCHAR(255) NOT NULL,
+      image ${textType} DEFAULT 'https://images.unsplash.com/photo-1508847154043-be5407fcaa5a?w=600',
+      question ${textType} DEFAULT 'โปรดโหวตหรือตอบคำถามสำหรับกิจกรรมนี้',
+      options ${textType} DEFAULT '["เห็นด้วย / เข้าร่วม", "ไม่เห็นด้วย / ไม่สะดวก", "ข้อเสนอแนะเพิ่มเติม"]',
+      start_date VARCHAR(255) NOT NULL,
+      end_date VARCHAR(255) NOT NULL,
+      status VARCHAR(255) NOT NULL DEFAULT 'active',
+      created_at ${datetimeType}
     )
   `);
 
-  try { targetDb.run("ALTER TABLE activities ADD COLUMN question TEXT DEFAULT 'โปรดโหวตหรือตอบคำถามสำหรับกิจกรรมนี้'"); } catch (_) {}
-  try { targetDb.run("ALTER TABLE activities ADD COLUMN options TEXT DEFAULT '[\"เห็นด้วย / เข้าร่วม\", \"ไม่เห็นด้วย / ไม่สะดวก\", \"ข้อเสนอแนะเพิ่มเติม\"]'"); } catch (_) {}
-
-  // Create activity_join table
-  targetDb.run(`
+  // 5. Activity Join
+  await executeSchemaQuery(`
     CREATE TABLE IF NOT EXISTS activity_join (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      activity_id INTEGER NOT NULL,
-      user_id INTEGER NOT NULL,
-      answer TEXT DEFAULT '',
-      joined_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      UNIQUE(activity_id, user_id),
-      FOREIGN KEY (activity_id) REFERENCES activities(id) ON DELETE CASCADE,
-      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+      id ${autoInc},
+      activity_id INT NOT NULL,
+      user_id INT NOT NULL,
+      answer ${textType} DEFAULT '',
+      joined_at ${datetimeType},
+      UNIQUE(activity_id, user_id)
     )
   `);
 
-  try { targetDb.run("ALTER TABLE activity_join ADD COLUMN answer TEXT DEFAULT ''"); } catch (_) {}
-
-  // Create activity_history table
-  targetDb.run(`
+  // 6. Activity History
+  await executeSchemaQuery(`
     CREATE TABLE IF NOT EXISTS activity_history (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      activity_id INTEGER NOT NULL,
-      title TEXT NOT NULL,
-      description TEXT NOT NULL,
-      reward TEXT NOT NULL,
-      image TEXT,
-      start_date TEXT NOT NULL,
-      end_date TEXT NOT NULL,
-      status TEXT DEFAULT 'finished',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      id ${autoInc},
+      activity_id INT NOT NULL,
+      title ${textType} NOT NULL,
+      description ${textType} NOT NULL,
+      reward VARCHAR(255) NOT NULL,
+      image ${textType},
+      start_date VARCHAR(255) NOT NULL,
+      end_date VARCHAR(255) NOT NULL,
+      status VARCHAR(255) DEFAULT 'finished',
+      created_at ${datetimeType}
     )
   `);
 
-  // Create shop_items table
-  targetDb.run(`
+  // 7. Shop Items
+  await executeSchemaQuery(`
     CREATE TABLE IF NOT EXISTS shop_items (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL,
-      description TEXT NOT NULL,
-      price REAL NOT NULL DEFAULT 0.00,
-      image TEXT DEFAULT 'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?w=600',
-      status TEXT NOT NULL DEFAULT 'available',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      id ${autoInc},
+      name VARCHAR(255) NOT NULL,
+      description ${textType} NOT NULL,
+      price NUMERIC NOT NULL DEFAULT 0.00,
+      image ${textType} DEFAULT 'https://images.unsplash.com/photo-1584438784894-089d6a62b8fa?w=600',
+      status VARCHAR(255) NOT NULL DEFAULT 'available',
+      created_at ${datetimeType}
     )
   `);
 
-  // Create logs table
-  targetDb.run(`
+  // 8. Logs / Audit Logs
+  await executeSchemaQuery(`
     CREATE TABLE IF NOT EXISTS logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      admin_discord_id TEXT NOT NULL,
-      action TEXT NOT NULL,
-      date TEXT NOT NULL,
-      time TEXT NOT NULL,
-      affected_user TEXT DEFAULT 'N/A',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      id ${autoInc},
+      admin_discord_id VARCHAR(255) NOT NULL,
+      action ${textType} NOT NULL,
+      date VARCHAR(255) NOT NULL,
+      time VARCHAR(255) NOT NULL,
+      affected_user VARCHAR(255) DEFAULT 'N/A',
+      created_at ${datetimeType}
     )
   `);
 
-  // Create discord_logs table for Discord Sync Bot
-  targetDb.run(`
+  // 9. Discord Logs
+  await executeSchemaQuery(`
     CREATE TABLE IF NOT EXISTS discord_logs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      message_id TEXT NOT NULL UNIQUE,
-      channel_id TEXT NOT NULL,
-      discord_id TEXT NOT NULL,
-      type TEXT NOT NULL,
-      raw_json TEXT NOT NULL,
-      reference_id TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      id ${autoInc},
+      message_id VARCHAR(255) UNIQUE NOT NULL,
+      channel_id VARCHAR(255) NOT NULL,
+      discord_id VARCHAR(255) NOT NULL,
+      type VARCHAR(255) NOT NULL,
+      raw_json ${textType} NOT NULL,
+      reference_id VARCHAR(255),
+      created_at ${datetimeType}
     )
   `);
 
-  // Create announcements table
-  targetDb.run(`
+  // 10. Announcements
+  await executeSchemaQuery(`
     CREATE TABLE IF NOT EXISTS announcements (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT NOT NULL,
-      message TEXT NOT NULL,
-      type TEXT DEFAULT 'announcement',
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      id ${autoInc},
+      title VARCHAR(255) NOT NULL,
+      message ${textType} NOT NULL,
+      type VARCHAR(255) DEFAULT 'announcement',
+      created_at ${datetimeType}
     )
   `);
 
-  // Create case_alerts table for Duty & Case Verification
-  targetDb.run(`
+  // 11. Case Alerts
+  await executeSchemaQuery(`
     CREATE TABLE IF NOT EXISTS case_alerts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      officer_id INTEGER,
-      case_id INTEGER NOT NULL UNIQUE,
-      case_number TEXT,
-      alert_type TEXT NOT NULL,
-      message TEXT NOT NULL,
-      severity TEXT NOT NULL DEFAULT 'HIGH',
-      status TEXT NOT NULL DEFAULT 'PENDING',
-      duty_start_time TEXT DEFAULT 'N/A',
-      duty_end_time TEXT DEFAULT 'N/A',
-      case_time TEXT DEFAULT 'N/A',
-      reviewed_at DATETIME,
-      reviewed_by TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (officer_id) REFERENCES users(id) ON DELETE SET NULL,
-      FOREIGN KEY (case_id) REFERENCES cases(id) ON DELETE CASCADE
+      id ${autoInc},
+      officer_id INT,
+      case_id INT NOT NULL UNIQUE,
+      case_number VARCHAR(255),
+      alert_type VARCHAR(255) NOT NULL,
+      message ${textType} NOT NULL,
+      severity VARCHAR(255) NOT NULL DEFAULT 'HIGH',
+      status VARCHAR(255) NOT NULL DEFAULT 'PENDING',
+      duty_start_time VARCHAR(255) DEFAULT 'N/A',
+      duty_end_time VARCHAR(255) DEFAULT 'N/A',
+      case_time VARCHAR(255) DEFAULT 'N/A',
+      reviewed_at ${datetimeType},
+      reviewed_by VARCHAR(255),
+      created_at ${datetimeType}
     )
   `);
 
-  // Create evidence table
-  targetDb.run(`
+  // 12. Evidence
+  await executeSchemaQuery(`
     CREATE TABLE IF NOT EXISTS evidence (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      case_number TEXT,
-      title TEXT NOT NULL,
-      description TEXT,
-      items TEXT,
-      image TEXT,
-      officer_name TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      id ${autoInc},
+      case_number VARCHAR(255),
+      title VARCHAR(255) NOT NULL,
+      description ${textType},
+      items ${textType},
+      image ${textType},
+      officer_name VARCHAR(255),
+      created_at ${datetimeType}
     )
   `);
 
-  // Create wanted table
-  targetDb.run(`
+  // 13. Wanted
+  await executeSchemaQuery(`
     CREATE TABLE IF NOT EXISTS wanted (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      suspect_name TEXT NOT NULL,
-      charges TEXT NOT NULL,
-      reward REAL DEFAULT 0,
-      status TEXT DEFAULT 'active',
-      officer_in_charge TEXT,
-      image TEXT,
-      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      id ${autoInc},
+      suspect_name VARCHAR(255) NOT NULL,
+      charges ${textType} NOT NULL,
+      reward NUMERIC DEFAULT 0,
+      status VARCHAR(255) DEFAULT 'active',
+      officer_in_charge VARCHAR(255),
+      image ${textType},
+      created_at ${datetimeType}
     )
   `);
 
-  try { targetDb.run("CREATE INDEX IF NOT EXISTS idx_case_alerts_status ON case_alerts(status)"); } catch (_) {}
-  try { targetDb.run("CREATE INDEX IF NOT EXISTS idx_case_alerts_case_id ON case_alerts(case_id)"); } catch (_) {}
-  try { targetDb.run("CREATE INDEX IF NOT EXISTS idx_case_alerts_officer_id ON case_alerts(officer_id)"); } catch (_) {}
+  // 14. Settings
+  await executeSchemaQuery(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key VARCHAR(255) PRIMARY KEY,
+      value ${textType},
+      updated_at ${datetimeType}
+    )
+  `);
+
+  // 15. Roles
+  await executeSchemaQuery(`
+    CREATE TABLE IF NOT EXISTS roles (
+      id ${autoInc},
+      name VARCHAR(255) UNIQUE NOT NULL,
+      permissions ${textType},
+      created_at ${datetimeType}
+    )
+  `);
+
+  // 16. Alias Views / Tables for compatibility (officers, attendance_logs, case_logs, audit_logs, discord_users)
+  const viewPrefix = isPg ? 'CREATE OR REPLACE VIEW' : 'CREATE VIEW IF NOT EXISTS';
+  try { await executeSchemaQuery(`${viewPrefix} officers AS SELECT * FROM users;`); } catch (_) {}
+  try { await executeSchemaQuery(`${viewPrefix} attendance_logs AS SELECT * FROM duty_logs;`); } catch (_) {}
+  try { await executeSchemaQuery(`${viewPrefix} case_logs AS SELECT * FROM cases;`); } catch (_) {}
+  try { await executeSchemaQuery(`${viewPrefix} audit_logs AS SELECT * FROM logs;`); } catch (_) {}
+  try { await executeSchemaQuery(`${viewPrefix} discord_users AS SELECT * FROM users;`); } catch (_) {}
 }
 
-export default db;
+async function executeSchemaQuery(sql: string) {
+  try {
+    await query(sql);
+  } catch (err: any) {
+    // Ignore harmless 'already exists' or view creation errors
+  }
+}
+
+export default { query, queryOne, initDB };

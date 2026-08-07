@@ -19,6 +19,7 @@ import evidenceRoutes from './routes/evidenceRoutes';
 import wantedRoutes from './routes/wantedRoutes';
 import dashboardRoutes from './routes/dashboardRoutes';
 import realtimeRoutes from './routes/realtimeRoutes';
+import dbBackupRoutes from './routes/dbBackupRoutes';
 
 export const createApp = () => {
   const app = express();
@@ -60,6 +61,7 @@ export const createApp = () => {
   app.use('/api/wanted', wantedRoutes);
   app.use('/api/dashboard', dashboardRoutes);
   app.use('/api/realtime', realtimeRoutes);
+  app.use('/api/admin/db', dbBackupRoutes);
 
   return app;
 };

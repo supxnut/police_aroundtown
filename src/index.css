@@ -1,1 +1,26 @@
 @import "tailwindcss";
+
+.case-history-scroll {
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: #7c3aed #111827;
+}
+
+.case-history-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.case-history-scroll::-webkit-scrollbar-track {
+  background: #111827;
+  border-radius: 999px;
+}
+
+.case-history-scroll::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #5b5bd6, #7c3aed);
+  border-radius: 999px;
+  transition: all 0.25s ease;
+}
+
+.case-history-scroll::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #7c3aed, #9333ea);
+}

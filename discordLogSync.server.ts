@@ -209,19 +209,9 @@ export async function syncDiscordCases(force: boolean = false): Promise<boolean>
       }
     }
 
-    console.log('[Discord Sync] Replacing Case Collection');
+    console.log('[Discord Sync] Updating Case Collection');
 
-    // Delete any cases in DB that no longer exist in Discord
-    const validMessageIds = validCases.map(c => c.messageId);
-
-    if (validMessageIds.length > 0) {
-      const placeholders = validMessageIds.map(() => '?').join(',');
-      await query(`DELETE FROM cases WHERE discord_message_id != '' AND discord_message_id NOT IN (${placeholders})`, validMessageIds);
-    } else {
-      await query(`DELETE FROM cases WHERE discord_message_id != ''`);
-    }
-
-    // Upsert every valid case into cases table
+    // Upsert every valid case into cases table without deleting existing database records
     for (const c of validCases) {
       const helpersJson = JSON.stringify(c.helperDiscordIds.map((hId: string) => ({
         discord_id: hId,

@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Briefcase, FolderOpen, Calendar, User, Users, Image as ImageIcon, X } from 'lucide-react';
+import React from 'react';
+import { Briefcase, FolderOpen, Calendar, User, Users } from 'lucide-react';
 import { Case } from '../../types';
 import { formatDate } from '../../utils/constants';
 
@@ -10,8 +10,6 @@ interface CasesCardProps {
 }
 
 export const CasesCard: React.FC<CasesCardProps> = ({ cases, totalCount }) => {
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
-
   const getTypeBadge = (type?: string) => {
     const t = type || 'คดีปกติ';
     switch (t) {
@@ -47,7 +45,7 @@ export const CasesCard: React.FC<CasesCardProps> = ({ cases, totalCount }) => {
       </div>
 
       {/* Case Logs List */}
-      <div className="mt-4 space-y-3 max-h-96 overflow-y-auto pr-1">
+      <div className="mt-4 space-y-3 max-h-96 case-history-scroll pr-1.5">
         {cases.length === 0 ? (
           <div className="text-center py-8 space-y-2 text-slate-500">
             <FolderOpen className="w-8 h-8 mx-auto opacity-40 mb-1" />
@@ -77,131 +75,84 @@ export const CasesCard: React.FC<CasesCardProps> = ({ cases, totalCount }) => {
             }
 
             const hasHelpers = helpersList.length > 0;
-            const hasImage = Boolean(c.image && c.image.trim().length > 0);
             const cleanDescription = (c.description || '').replace(/<@!?(\d+)>/g, '$1');
 
             return (
               <div
                 key={c.id}
-                className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/80 hover:border-slate-700 transition-colors shadow-sm"
+                className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/80 hover:border-slate-700 transition-colors shadow-sm w-full space-y-2.5"
               >
-                <div className="flex flex-col md:flex-row gap-4">
-                  {/* Column Left */}
-                  <div className={`w-full ${hasImage ? 'md:w-[70%]' : 'md:w-full'} space-y-2.5`}>
-                    {/* Top Row: Case ID, Type, Date */}
-                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-900 pb-2">
-                      <div className="flex items-center space-x-2">
-                        <span className="text-[11px] font-mono font-extrabold text-indigo-400">#{caseIdStr}</span>
-                        {getTypeBadge(typeStr)}
-                      </div>
-                      <div className="flex items-center space-x-1 text-[10px] text-slate-400 font-mono">
-                        <Calendar className="w-3 h-3 text-slate-500" />
-                        <span>{dateStr}</span>
-                      </div>
-                    </div>
-
-                    {/* Primary Officer Info */}
-                    <div className="flex items-center space-x-2.5">
-                      {officerAvatar ? (
-                        <img
-                          src={officerAvatar}
-                          alt={officerName}
-                          className="w-6 h-6 rounded-full object-cover border border-slate-700"
-                        />
-                      ) : (
-                        <div className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center text-slate-400">
-                          <User className="w-3.5 h-3.5" />
-                        </div>
-                      )}
-                      <div className="text-xs">
-                        <span className="text-slate-400 text-[10px]">ผู้ลงคดี: </span>
-                        <strong className="text-slate-200 font-semibold">{officerName}</strong>
-                      </div>
-                    </div>
-
-                    {/* Helpers Section (Only shown if helpers exist) */}
-                    {hasHelpers && (
-                      <div className="flex items-start space-x-2 bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
-                        <Users className="w-3.5 h-3.5 text-indigo-400 mt-0.5 flex-shrink-0" />
-                        <div className="space-y-1">
-                          <span className="text-[10px] text-slate-400 block font-semibold">ผู้ช่วย:</span>
-                          <div className="flex flex-wrap gap-1">
-                            {helpersList.map((h: any, idx: number) => {
-                              const rawHName = typeof h === 'string' ? h : h.name || h.fullname || h.id || `Helper ${idx + 1}`;
-                              const hName = String(rawHName).replace(/<@!?(\d+)>/g, '$1');
-                              const hAvatar = typeof h === 'object' ? h.avatar : undefined;
-                              return (
-                                <span
-                                  key={idx}
-                                  className="inline-flex items-center space-x-1 bg-indigo-500/15 border border-indigo-500/30 text-indigo-200 px-2 py-0.5 rounded-full text-[10px] font-medium"
-                                >
-                                  {hAvatar && (
-                                    <img src={hAvatar} alt={hName} className="w-3 h-3 rounded-full object-cover" />
-                                  )}
-                                  <span>{hName}</span>
-                                </span>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Description */}
-                    {cleanDescription && (
-                      <p className="text-xs text-slate-300 leading-relaxed bg-slate-900/40 p-2 rounded border border-slate-800/40 whitespace-pre-wrap">
-                        {cleanDescription}
-                      </p>
-                    )}
+                {/* Top Row: Case ID, Type, Date */}
+                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-900 pb-2 w-full">
+                  <div className="flex items-center space-x-2">
+                    <span className="text-[11px] font-mono font-extrabold text-indigo-400">#{caseIdStr}</span>
+                    {getTypeBadge(typeStr)}
                   </div>
+                  <div className="flex items-center space-x-1 text-[10px] text-slate-400 font-mono">
+                    <Calendar className="w-3 h-3 text-slate-500" />
+                    <span>{dateStr}</span>
+                  </div>
+                </div>
 
-                  {/* Column Right (Only if image exists) */}
-                  {hasImage && (
-                    <div className="w-full md:w-[30%] flex-shrink-0 flex flex-col justify-center">
-                      <div
-                        onClick={() => setSelectedImage(c.image!)}
-                        className="group relative w-full aspect-[4/3] cursor-pointer overflow-hidden rounded-[12px] border border-slate-800 hover:border-indigo-500/50 transition-all shadow-md"
-                      >
-                        <img
-                          src={c.image}
-                          alt="Case Evidence"
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
-                          onError={(e) => {
-                            (e.target as HTMLElement).style.display = 'none';
-                          }}
-                        />
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] font-bold space-x-1 p-2 text-center">
-                          <ImageIcon className="w-4 h-4 flex-shrink-0" />
-                          <span>คลิกเพื่อดูภาพเต็ม</span>
-                        </div>
-                      </div>
+                {/* Primary Officer Info */}
+                <div className="flex items-center space-x-2.5 w-full">
+                  {officerAvatar ? (
+                    <img
+                      src={officerAvatar}
+                      alt={officerName}
+                      className="w-6 h-6 rounded-full object-cover border border-slate-700"
+                    />
+                  ) : (
+                    <div className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center text-slate-400">
+                      <User className="w-3.5 h-3.5" />
                     </div>
                   )}
+                  <div className="text-xs">
+                    <span className="text-slate-400 text-[10px]">ผู้ลงคดี: </span>
+                    <strong className="text-slate-200 font-semibold">{officerName}</strong>
+                  </div>
                 </div>
+
+                {/* Helpers Section (Only shown if helpers exist) */}
+                {hasHelpers && (
+                  <div className="flex items-start space-x-2 bg-slate-900/60 p-2 rounded-lg border border-slate-800/60 w-full">
+                    <Users className="w-3.5 h-3.5 text-indigo-400 mt-0.5 flex-shrink-0" />
+                    <div className="space-y-1 w-full">
+                      <span className="text-[10px] text-slate-400 block font-semibold">ผู้ช่วย:</span>
+                      <div className="flex flex-wrap gap-1">
+                        {helpersList.map((h: any, idx: number) => {
+                          const rawHName = typeof h === 'string' ? h : h.name || h.fullname || h.id || `Helper ${idx + 1}`;
+                          const hName = String(rawHName).replace(/<@!?(\d+)>/g, '$1');
+                          const hAvatar = typeof h === 'object' ? h.avatar : undefined;
+                          return (
+                            <span
+                              key={idx}
+                              className="inline-flex items-center space-x-1 bg-indigo-500/15 border border-indigo-500/30 text-indigo-200 px-2 py-0.5 rounded-full text-[10px] font-medium"
+                            >
+                              {hAvatar && (
+                                <img src={hAvatar} alt={hName} className="w-3 h-3 rounded-full object-cover" />
+                              )}
+                              <span>{hName}</span>
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Description */}
+                {cleanDescription && (
+                  <p className="text-xs text-slate-300 leading-relaxed bg-slate-900/40 p-2 rounded border border-slate-800/40 whitespace-pre-wrap w-full">
+                    {cleanDescription}
+                  </p>
+                )}
               </div>
             );
           })
         )}
       </div>
-
-      {/* Image Full-Size Modal */}
-      {selectedImage && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="relative max-w-4xl max-h-[90vh] bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden p-2 shadow-2xl flex flex-col items-center">
-            <button
-              onClick={() => setSelectedImage(null)}
-              className="absolute top-4 right-4 bg-slate-950/80 hover:bg-slate-800 text-slate-300 p-2 rounded-full border border-slate-700 transition-colors z-10"
-            >
-              <X className="w-5 h-5" />
-            </button>
-            <img
-              src={selectedImage}
-              alt="Full Case View"
-              className="max-h-[80vh] w-auto object-contain rounded-xl"
-            />
-          </div>
-        </div>
-      )}
     </div>
   );
 };
+
