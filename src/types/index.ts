@@ -24,23 +24,63 @@ export interface DutyLog {
   created_at?: string;
 }
 
+export interface HelperUser {
+  id?: string;
+  name?: string;
+  avatar?: string;
+  discord_id?: string;
+}
+
 export interface Case {
   id: number;
   case_number: string;
+  caseId?: string;
   title: string;
+  type?: string;
+  case_type?: string;
   description: string;
   suspect_name: string;
   officer_in_charge: string;
+  officerName?: string;
+  officer_discord_id?: string;
+  officerId?: string;
+  officer_avatar?: string;
+  officerAvatar?: string;
+  assistant_officer?: string;
+  helpers?: HelperUser[] | string[];
+  image?: string;
+  discord_message_id?: string;
+  discordMessageId?: string;
   status: 'open' | 'closed' | 'pending';
   date?: string;
   fine?: number;
   reporter_name?: string;
-  officer_discord_id?: string;
   officer_rank?: string;
   received_time?: string;
   closed_time?: string;
   duration?: string;
   created_at?: string;
+  createdAt?: string;
+  updated_at?: string;
+  updatedAt?: string;
+  has_alert?: boolean;
+  alert_type?: string | null;
+  alert_message?: string | null;
+  alert_status?: string | null;
+}
+
+export interface OfficerTypeStat {
+  type: string;
+  selfCount: number;
+  helperCount: number;
+  totalCount: number;
+}
+
+export interface OfficerStatsSummary {
+  officerId: string;
+  officerName: string;
+  breakdown: OfficerTypeStat[];
+  totalAllCases: number;
 }
 
 export interface Activity {

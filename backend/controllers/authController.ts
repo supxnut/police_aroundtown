@@ -218,13 +218,33 @@ export const authController = {
 
   async me(req: AuthRequest, res: Response) {
     if (!req.user) {
+      res.clearCookie('token');
       return res.status(401).json({ success: false, message: 'Not authenticated' });
     }
-    const isAdmin = config.adminDiscordIds.includes(req.user.discord_id) || req.user.isAdmin === true;
+
+    const dbUser = await userModel.findByDiscordId(req.user.discord_id);
+    if (!dbUser || dbUser.active === 0) {
+      res.clearCookie('token');
+      return res.status(401).json({
+        success: false,
+        message: 'คุณถูกลบออกจากรายชื่อบุคลากร หรือบัญชีของคุณถูกระงับ',
+        forceLogout: true,
+      });
+    }
+
+    const isEnvAdmin = config.adminDiscordIds.includes(dbUser.discord_id);
+    const isAdmin = isEnvAdmin || dbUser.rank === 'Chief of Police';
+
     return res.json({
       success: true,
       user: {
-        ...req.user,
+        id: dbUser.id,
+        discord_id: dbUser.discord_id,
+        fullname: dbUser.fullname,
+        rank: dbUser.rank,
+        start_date: dbUser.start_date,
+        avatar: dbUser.avatar,
+        active: dbUser.active,
         isAdmin,
       },
     });

@@ -1,5 +1,5 @@
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import React, { useEffect } from 'react';
+import { BrowserRouter as Router, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { NotificationProvider } from './contexts/NotificationContext';
 import { MainLayout } from './layouts/MainLayout';
@@ -23,7 +23,12 @@ import { AdminCaseAlertsPage } from './pages/admin/AdminCaseAlertsPage';
 
 // Protected Route Wrapper for Authenticated Users
 const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, loading } = useAuth();
+  const { user, loading, checkAuth } = useAuth();
+  const location = useLocation();
+
+  useEffect(() => {
+    checkAuth(false);
+  }, [location.pathname]);
 
   if (loading) {
     return (
@@ -42,7 +47,12 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode }> = ({ children }) =
 
 // Admin Guard Wrapper
 const AdminRoute: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { user, isAdmin, loading } = useAuth();
+  const { user, isAdmin, loading, checkAuth } = useAuth();
+  const location = useLocation();
+
+  useEffect(() => {
+    checkAuth(false);
+  }, [location.pathname]);
 
   if (loading) {
     return (

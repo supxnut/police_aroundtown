@@ -1,18 +1,18 @@
 import { Router } from 'express';
 import { caseController } from '../controllers/caseController';
-import { authenticateToken, requireAdmin } from '../middleware/auth';
+import { authenticateToken, requireAdmin, verifyApiKeyOrAuth } from '../middleware/auth';
 
 const router = Router();
 
-router.use(authenticateToken);
+// Public / Bot / Auth routes with x-api-key or Session token
+router.post('/', verifyApiKeyOrAuth, caseController.createCase);
+router.get('/', verifyApiKeyOrAuth, caseController.getAllCases);
+router.get('/officer-stats', verifyApiKeyOrAuth, caseController.getOfficerStats);
+router.get('/officer-stats/:discordId', verifyApiKeyOrAuth, caseController.getOfficerStats);
 
-// Officers can view cases
-router.get('/', caseController.getAllCases);
-router.get('/export', requireAdmin, caseController.exportCsv);
-
-// Admin can manage cases
-router.post('/', requireAdmin, caseController.createCase);
-router.put('/:id', requireAdmin, caseController.updateCase);
-router.delete('/:id', requireAdmin, caseController.deleteCase);
+// Admin-only management routes
+router.get('/export', authenticateToken, requireAdmin, caseController.exportCsv);
+router.put('/:id', authenticateToken, requireAdmin, caseController.updateCase);
+router.delete('/:id', authenticateToken, requireAdmin, caseController.deleteCase);
 
 export default router;

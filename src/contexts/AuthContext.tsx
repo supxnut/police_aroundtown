@@ -9,7 +9,7 @@ interface AuthContextType {
   loginWithDiscordId: (discordId: string) => Promise<{ success: boolean; isAdmin?: boolean; message?: string }>;
   devLogin: (discordId: string) => Promise<{ success: boolean; isAdmin?: boolean; message?: string }>;
   logout: () => Promise<void>;
-  checkAuth: () => Promise<void>;
+  checkAuth: (showLoading?: boolean) => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -19,13 +19,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isAdmin, setIsAdmin] = useState<boolean>(false);
   const [loading, setLoading] = useState<boolean>(true);
 
-  const checkAuth = async () => {
+  const checkAuth = async (showLoading = false) => {
     try {
-      setLoading(true);
+      if (showLoading) setLoading(true);
       const res = await api.get('/auth/me');
       if (res.data.success && res.data.user) {
         setUser(res.data.user);
-        setIsAdmin(res.data.user.isAdmin);
+        setIsAdmin(!!res.data.user.isAdmin);
       } else {
         localStorage.removeItem('auth_token');
         setUser(null);
@@ -36,12 +36,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(null);
       setIsAdmin(false);
     } finally {
-      setLoading(false);
+      if (showLoading) setLoading(false);
     }
   };
 
   useEffect(() => {
-    checkAuth();
+    checkAuth(true);
   }, []);
 
   const loginWithDiscordId = async (discordId: string) => {

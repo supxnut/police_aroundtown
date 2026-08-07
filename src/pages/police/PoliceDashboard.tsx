@@ -1,13 +1,15 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { useAuth } from '../../contexts/AuthContext';
 import api from '../../api/axios';
-import { DutyLog, Case, Activity } from '../../types';
+import { DutyLog, Case, Activity, OfficerTypeStat } from '../../types';
 import { DutyCard } from '../../components/police/DutyCard';
 import { CasesCard } from '../../components/police/CasesCard';
 import { ActivityCard } from '../../components/police/ActivityCard';
+import { OfficerPerformanceCard } from '../../components/police/OfficerPerformanceCard';
 import { Badge } from '../../components/common/Badge';
-import { Calendar, Flame, Filter, Clock, Briefcase } from 'lucide-react';
+import { Calendar, Flame, Filter } from 'lucide-react';
 import { formatDate, getCurrentWeekRange } from '../../utils/constants';
+import { useRealtimeCases } from '../../hooks/useRealtimeCases';
 import toast from 'react-hot-toast';
 
 export const PoliceDashboard: React.FC = () => {
@@ -16,20 +18,16 @@ export const PoliceDashboard: React.FC = () => {
   const [cases, setCases] = useState<Case[]>([]);
   const [activities, setActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
-  const [joiningId, setJoiningId] = useState<number | null>(null);
 
-  // Date Filter State
-  const [filterType, setFilterType] = useState<'week' | 'all' | 'custom'>('week');
+  // Date Filter State: 'all' | 'week' | 'month' | 'custom'
+  const [filterType, setFilterType] = useState<'all' | 'week' | 'month' | 'custom'>('all');
   const [startDate, setStartDate] = useState<string>(() => {
-    const { sunday } = getCurrentWeekRange();
-    return sunday.toISOString().split('T')[0];
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
   });
-  const [endDate, setEndDate] = useState<string>(() => {
-    const { saturday } = getCurrentWeekRange();
-    return saturday.toISOString().split('T')[0];
-  });
+  const [endDate, setEndDate] = useState<string>(() => new Date().toISOString().split('T')[0]);
 
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       const [dutyRes, caseRes, actRes] = await Promise.all([
@@ -52,28 +50,16 @@ export const PoliceDashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [fetchData]);
 
-  const handleJoinActivity = async (id: number) => {
-    try {
-      setJoiningId(id);
-      const res = await api.post(`/activities/${id}/join`);
-      if (res.data.success) {
-        toast.success('เข้าร่วมกิจกรรมปฏิบัติการเรียบร้อยแล้ว');
-        fetchData();
-      }
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || 'ไม่สามารถเข้าร่วมกิจกรรมได้');
-    } finally {
-      setJoiningId(null);
-    }
-  };
+  // Connect Realtime Updates via EventSource SSE
+  useRealtimeCases(fetchData);
 
-  // Date Filtering Helpers
+  // Date Filtering Helper
   const isDateInFilter = (dateStr?: string) => {
     if (!dateStr) return false;
     if (filterType === 'all') return true;
@@ -81,9 +67,17 @@ export const PoliceDashboard: React.FC = () => {
     const targetDate = new Date(dateStr).getTime();
     if (isNaN(targetDate)) return true;
 
+    const now = new Date();
+
     if (filterType === 'week') {
       const { sunday, saturday } = getCurrentWeekRange();
       return targetDate >= sunday.getTime() && targetDate <= saturday.getTime();
+    }
+
+    if (filterType === 'month') {
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
+      const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59, 999);
+      return targetDate >= startOfMonth.getTime() && targetDate <= endOfMonth.getTime();
     }
 
     if (filterType === 'custom') {
@@ -95,25 +89,14 @@ export const PoliceDashboard: React.FC = () => {
     return true;
   };
 
-  const filteredDutyLogs = dutyLogs.filter((log) => isDateInFilter(log.date));
-  const filteredCases = cases.filter((c) => isDateInFilter(c.created_at || c.date));
+  const filteredDutyLogs = useMemo(() => dutyLogs.filter((log) => isDateInFilter(log.date)), [dutyLogs, filterType, startDate, endDate]);
+  const filteredCases = useMemo(() => cases.filter((c) => isDateInFilter(c.created_at || c.createdAt || c.date)), [cases, filterType, startDate, endDate]);
 
-  const totalFilteredHours = filteredDutyLogs.reduce((acc, l) => acc + (parseFloat(l.hours as any) || 0), 0);
+  const totalFilteredHours = useMemo(() => filteredDutyLogs.reduce((acc, l) => acc + (parseFloat(l.hours as any) || 0), 0), [filteredDutyLogs]);
   const totalFilteredCases = filteredCases.length;
 
   // Calculate qualified workdays (Days where total duty hours >= 3)
-  const totalQualifiedWorkDays = React.useMemo(() => {
-    const hoursPerDay: Record<string, number> = {};
-    dutyLogs.forEach((log) => {
-      if (!log.date) return;
-      const dateKey = log.date.substring(0, 10);
-      const hrs = parseFloat(log.hours as any) || 0;
-      hoursPerDay[dateKey] = (hoursPerDay[dateKey] || 0) + hrs;
-    });
-    return Object.values(hoursPerDay).filter((hrs) => hrs >= 3).length;
-  }, [dutyLogs]);
-
-  const filteredQualifiedWorkDays = React.useMemo(() => {
+  const totalQualifiedWorkDays = useMemo(() => {
     const hoursPerDay: Record<string, number> = {};
     filteredDutyLogs.forEach((log) => {
       if (!log.date) return;
@@ -124,11 +107,99 @@ export const PoliceDashboard: React.FC = () => {
     return Object.values(hoursPerDay).filter((hrs) => hrs >= 3).length;
   }, [filteredDutyLogs]);
 
+  // Calculate Officer Summary Performance Breakdown (คดีปกติ, Take2, ส้มแดง, จัดร้าน)
+  const officerPerformanceStats = useMemo(() => {
+    if (!user) return { breakdown: [], totalCases: 0 };
+
+    const defaultTypes = ['คดีปกติ', 'Take2', 'ส้มแดง', 'จัดร้าน'];
+    const map: Record<string, { selfCount: number; helperCount: number }> = {};
+    defaultTypes.forEach((t) => {
+      map[t] = { selfCount: 0, helperCount: 0 };
+    });
+
+    const userDiscordId = (user.discord_id || '').trim();
+    const userName = (user.fullname || '').trim().toLowerCase();
+
+    let totalCasesCount = 0;
+
+    filteredCases.forEach((c) => {
+      const cType = c.type || c.case_type || 'คดีปกติ';
+      if (!map[cType]) {
+        map[cType] = { selfCount: 0, helperCount: 0 };
+      }
+
+      const cOfficerId = (c.officerId || c.officer_discord_id || '').trim();
+      const cOfficerName = (c.officerName || c.officer_in_charge || '').trim().toLowerCase();
+
+      const isPrimary = (userDiscordId && cOfficerId === userDiscordId) || (userName && cOfficerName.includes(userName));
+
+      // Check if helper
+      let isHelper = false;
+      let helpersList: any[] = [];
+      if (Array.isArray(c.helpers)) {
+        helpersList = c.helpers;
+      } else if (typeof c.helpers === 'string' && (c.helpers as string).trim()) {
+        try {
+          helpersList = JSON.parse(c.helpers);
+        } catch (_) {
+          helpersList = (c.helpers as string).split(',').map((h) => ({ name: h.trim() }));
+        }
+      }
+
+      if (helpersList.length > 0) {
+        isHelper = helpersList.some((h: any) => {
+          if (typeof h === 'string') {
+            return (userDiscordId && h.includes(userDiscordId)) || (userName && h.toLowerCase().includes(userName));
+          }
+          if (typeof h === 'object' && h !== null) {
+            return (
+              (userDiscordId && (h.id === userDiscordId || h.discord_id === userDiscordId)) ||
+              (userName && (h.name || '').toLowerCase().includes(userName))
+            );
+          }
+          return false;
+        });
+      } else if (c.assistant_officer && userName) {
+        isHelper = c.assistant_officer.toLowerCase().includes(userName);
+      }
+
+      if (isPrimary) {
+        map[cType].selfCount += 1;
+        totalCasesCount += 1;
+      } else if (isHelper) {
+        map[cType].helperCount += 1;
+        totalCasesCount += 1;
+      }
+    });
+
+    const breakdown: OfficerTypeStat[] = Object.keys(map).map((type) => ({
+      type,
+      selfCount: map[type].selfCount,
+      helperCount: map[type].helperCount,
+      totalCount: map[type].selfCount + map[type].helperCount,
+    }));
+
+    return { breakdown, totalCases: totalCasesCount };
+  }, [filteredCases, user]);
+
+  const filterTypeLabel = useMemo(() => {
+    switch (filterType) {
+      case 'week':
+        return 'สัปดาห์นี้';
+      case 'month':
+        return 'เดือนนี้';
+      case 'custom':
+        return 'เลือกช่วงเวลา';
+      default:
+        return 'ทั้งหมด';
+    }
+  }, [filterType]);
+
   if (!user) return null;
 
   return (
     <div className="space-y-6 animate-in fade-in duration-200">
-      {/* Officer Header Card */}
+      {/* Officer Header Profile Card */}
       <div className="bg-gradient-to-r from-slate-900 via-slate-900 to-slate-950 border border-slate-800 rounded-2xl p-6 shadow-2xl relative overflow-hidden flex flex-col md:flex-row items-center justify-between gap-6">
         <div className="flex items-center space-x-5">
           <img
@@ -157,7 +228,7 @@ export const PoliceDashboard: React.FC = () => {
 
           <div className="bg-slate-950/80 border border-slate-800 p-3.5 rounded-xl text-center min-w-[130px]">
             <span className="text-2xl font-black text-amber-400">{totalFilteredCases}</span>
-            <span className="block text-[10px] uppercase font-bold text-slate-300 mt-1">จำนวนคดี</span>
+            <span className="block text-[10px] uppercase font-bold text-slate-300 mt-1">จำนวนคดี ({filterTypeLabel})</span>
           </div>
 
           <div className="bg-slate-950/80 border border-emerald-500/30 bg-emerald-500/5 p-3.5 rounded-xl text-center min-w-[140px] relative">
@@ -177,16 +248,6 @@ export const PoliceDashboard: React.FC = () => {
 
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={() => setFilterType('week')}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
-              filterType === 'week'
-                ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30'
-                : 'bg-slate-950 text-slate-400 border border-slate-800 hover:border-slate-700'
-            }`}
-          >
-            รายสัปดาห์ (อาทิตย์ 00:00 - เสาร์ 23:59)
-          </button>
-          <button
             onClick={() => setFilterType('all')}
             className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
               filterType === 'all'
@@ -195,6 +256,26 @@ export const PoliceDashboard: React.FC = () => {
             }`}
           >
             ทั้งหมด
+          </button>
+          <button
+            onClick={() => setFilterType('week')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              filterType === 'week'
+                ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30'
+                : 'bg-slate-950 text-slate-400 border border-slate-800 hover:border-slate-700'
+            }`}
+          >
+            สัปดาห์นี้
+          </button>
+          <button
+            onClick={() => setFilterType('month')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all ${
+              filterType === 'month'
+                ? 'bg-rose-600 text-white shadow-md shadow-rose-600/30'
+                : 'bg-slate-950 text-slate-400 border border-slate-800 hover:border-slate-700'
+            }`}
+          >
+            เดือนนี้
           </button>
           <button
             onClick={() => setFilterType('custom')}
@@ -226,6 +307,15 @@ export const PoliceDashboard: React.FC = () => {
           </div>
         )}
       </div>
+
+      {/* Officer Summary Performance Breakdown Card */}
+      <OfficerPerformanceCard
+        officerName={user.fullname}
+        discordId={user.discord_id}
+        breakdown={officerPerformanceStats.breakdown}
+        totalCases={officerPerformanceStats.totalCases}
+        filterLabel={filterTypeLabel}
+      />
 
       {/* Main Grid Section */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -262,4 +352,3 @@ export const PoliceDashboard: React.FC = () => {
     </div>
   );
 };
-
