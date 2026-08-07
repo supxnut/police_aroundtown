@@ -81,95 +81,105 @@ export const CasesCard: React.FC<CasesCardProps> = ({ cases, totalCount }) => {
             return (
               <div
                 key={c.id}
-                className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/80 space-y-2.5 hover:border-slate-700 transition-colors shadow-sm"
+                className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/80 hover:border-slate-700 transition-colors shadow-sm"
               >
-                {/* Top Row: Case ID, Type, Date */}
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-900 pb-2">
-                  <div className="flex items-center space-x-2">
-                    <span className="text-[11px] font-mono font-extrabold text-indigo-400">#{caseIdStr}</span>
-                    {getTypeBadge(typeStr)}
-                  </div>
-                  <div className="flex items-center space-x-1 text-[10px] text-slate-400 font-mono">
-                    <Calendar className="w-3 h-3 text-slate-500" />
-                    <span>{dateStr}</span>
-                  </div>
-                </div>
-
-                {/* Primary Officer Info */}
-                <div className="flex items-center space-x-2.5">
-                  {officerAvatar ? (
-                    <img
-                      src={officerAvatar}
-                      alt={officerName}
-                      className="w-6 h-6 rounded-full object-cover border border-slate-700"
-                    />
-                  ) : (
-                    <div className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center text-slate-400">
-                      <User className="w-3.5 h-3.5" />
-                    </div>
-                  )}
-                  <div className="text-xs">
-                    <span className="text-slate-400 text-[10px]">ผู้ลงคดี: </span>
-                    <strong className="text-slate-200 font-semibold">{officerName}</strong>
-                  </div>
-                </div>
-
-                {/* Helpers Section (Only shown if helpers exist) */}
-                {hasHelpers && (
-                  <div className="flex items-start space-x-2 bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
-                    <Users className="w-3.5 h-3.5 text-indigo-400 mt-0.5 flex-shrink-0" />
-                    <div className="space-y-1">
-                      <span className="text-[10px] text-slate-400 block font-semibold">ผู้ช่วย:</span>
-                      <div className="flex flex-wrap gap-1">
-                        {helpersList.map((h: any, idx: number) => {
-                          const hName = typeof h === 'string' ? h : h.name || h.fullname || h.id || `Helper ${idx + 1}`;
-                          const hAvatar = typeof h === 'object' ? h.avatar : undefined;
-                          return (
-                            <span
-                              key={idx}
-                              className="inline-flex items-center space-x-1 bg-indigo-500/15 border border-indigo-500/30 text-indigo-200 px-2 py-0.5 rounded-full text-[10px] font-medium"
-                            >
-                              {hAvatar && (
-                                <img src={hAvatar} alt={hName} className="w-3 h-3 rounded-full object-cover" />
-                              )}
-                              <span>{hName}</span>
-                            </span>
-                          );
-                        })}
+                <div className="flex flex-col md:flex-row gap-4">
+                  {/* Column Left (70% Desktop, Top Mobile) */}
+                  <div className="w-full md:w-[70%] space-y-2.5">
+                    {/* Top Row: Case ID, Type, Date */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-900 pb-2">
+                      <div className="flex items-center space-x-2">
+                        <span className="text-[11px] font-mono font-extrabold text-indigo-400">#{caseIdStr}</span>
+                        {getTypeBadge(typeStr)}
+                      </div>
+                      <div className="flex items-center space-x-1 text-[10px] text-slate-400 font-mono">
+                        <Calendar className="w-3 h-3 text-slate-500" />
+                        <span>{dateStr}</span>
                       </div>
                     </div>
-                  </div>
-                )}
 
-                {/* Description */}
-                {c.description && (
-                  <p className="text-xs text-slate-300 leading-relaxed bg-slate-900/40 p-2 rounded border border-slate-800/40 whitespace-pre-wrap">
-                    {c.description}
-                  </p>
-                )}
-
-                {/* Image Thumbnail (Only rendered if image exists) */}
-                {hasImage && (
-                  <div className="pt-1">
-                    <div
-                      onClick={() => setSelectedImage(c.image!)}
-                      className="group relative inline-block cursor-pointer overflow-hidden rounded-lg border border-slate-800 hover:border-indigo-500/50 transition-all max-w-[200px]"
-                    >
-                      <img
-                        src={c.image}
-                        alt="Case thumbnail"
-                        className="h-24 w-full object-cover group-hover:scale-105 transition-transform duration-200"
-                        onError={(e) => {
-                          (e.target as HTMLElement).style.display = 'none';
-                        }}
-                      />
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] font-bold space-x-1">
-                        <ImageIcon className="w-3.5 h-3.5" />
-                        <span>คลิกเพื่อดูภาพเต็ม</span>
+                    {/* Primary Officer Info */}
+                    <div className="flex items-center space-x-2.5">
+                      {officerAvatar ? (
+                        <img
+                          src={officerAvatar}
+                          alt={officerName}
+                          className="w-6 h-6 rounded-full object-cover border border-slate-700"
+                        />
+                      ) : (
+                        <div className="w-6 h-6 rounded-full bg-slate-800 flex items-center justify-center text-slate-400">
+                          <User className="w-3.5 h-3.5" />
+                        </div>
+                      )}
+                      <div className="text-xs">
+                        <span className="text-slate-400 text-[10px]">ผู้ลงคดี: </span>
+                        <strong className="text-slate-200 font-semibold">{officerName}</strong>
                       </div>
                     </div>
+
+                    {/* Helpers Section (Only shown if helpers exist) */}
+                    {hasHelpers && (
+                      <div className="flex items-start space-x-2 bg-slate-900/60 p-2 rounded-lg border border-slate-800/60">
+                        <Users className="w-3.5 h-3.5 text-indigo-400 mt-0.5 flex-shrink-0" />
+                        <div className="space-y-1">
+                          <span className="text-[10px] text-slate-400 block font-semibold">ผู้ช่วย:</span>
+                          <div className="flex flex-wrap gap-1">
+                            {helpersList.map((h: any, idx: number) => {
+                              const hName = typeof h === 'string' ? h : h.name || h.fullname || h.id || `Helper ${idx + 1}`;
+                              const hAvatar = typeof h === 'object' ? h.avatar : undefined;
+                              return (
+                                <span
+                                  key={idx}
+                                  className="inline-flex items-center space-x-1 bg-indigo-500/15 border border-indigo-500/30 text-indigo-200 px-2 py-0.5 rounded-full text-[10px] font-medium"
+                                >
+                                  {hAvatar && (
+                                    <img src={hAvatar} alt={hName} className="w-3 h-3 rounded-full object-cover" />
+                                  )}
+                                  <span>{hName}</span>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Description */}
+                    {c.description && (
+                      <p className="text-xs text-slate-300 leading-relaxed bg-slate-900/40 p-2 rounded border border-slate-800/40 whitespace-pre-wrap">
+                        {c.description}
+                      </p>
+                    )}
                   </div>
-                )}
+
+                  {/* Column Right (30% Desktop, Bottom Mobile) */}
+                  <div className="w-full md:w-[30%] flex-shrink-0 flex flex-col justify-center">
+                    {hasImage ? (
+                      <div
+                        onClick={() => setSelectedImage(c.image!)}
+                        className="group relative w-full aspect-[4/3] cursor-pointer overflow-hidden rounded-[12px] border border-slate-800 hover:border-indigo-500/50 transition-all shadow-md"
+                      >
+                        <img
+                          src={c.image}
+                          alt="Case Evidence"
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-200"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                        />
+                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white text-[10px] font-bold space-x-1 p-2 text-center">
+                          <ImageIcon className="w-4 h-4 flex-shrink-0" />
+                          <span>คลิกเพื่อดูภาพเต็ม</span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="w-full aspect-[4/3] bg-slate-900/60 rounded-[12px] border border-dashed border-slate-800 flex flex-col items-center justify-center text-slate-500 gap-1.5 p-2 text-center">
+                        <ImageIcon className="w-6 h-6 text-slate-600" />
+                        <span className="text-[11px] text-slate-500 font-medium">ไม่มีรูปหลักฐาน</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
               </div>
             );
           })

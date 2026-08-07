@@ -50,19 +50,25 @@ export const OfficerPerformanceCard: React.FC<OfficerPerformanceCardProps> = ({
         {breakdown.map((item) => {
           let badgeColor = 'from-slate-800/80 to-slate-900/80 border-slate-800 text-slate-200';
           let textColor = 'text-slate-300';
+          let displayTitle = item.type;
 
-          if (item.type === 'Take2') {
+          const lowerType = item.type.toLowerCase();
+          if (lowerType === 'take2' || item.type === 'Take2') {
             badgeColor = 'from-purple-950/40 to-slate-900/80 border-purple-500/30 text-purple-300';
             textColor = 'text-purple-300';
-          } else if (item.type === 'ส้มแดง') {
+            displayTitle = 'Take2';
+          } else if (lowerType === 'red' || item.type === 'ส้มแดง') {
             badgeColor = 'from-orange-950/40 to-slate-900/80 border-orange-500/30 text-orange-300';
             textColor = 'text-orange-300';
-          } else if (item.type === 'จัดร้าน') {
+            displayTitle = 'ส้มแดง';
+          } else if (lowerType === 'raid' || item.type === 'จัดร้าน') {
             badgeColor = 'from-blue-950/40 to-slate-900/80 border-blue-500/30 text-blue-300';
             textColor = 'text-blue-300';
-          } else {
+            displayTitle = 'จัดร้าน';
+          } else if (lowerType === 'normal' || item.type === 'คดีปกติ') {
             badgeColor = 'from-rose-950/40 to-slate-900/80 border-rose-500/30 text-rose-300';
             textColor = 'text-rose-300';
+            displayTitle = 'คดีปกติ';
           }
 
           return (
@@ -71,7 +77,7 @@ export const OfficerPerformanceCard: React.FC<OfficerPerformanceCardProps> = ({
               className={`p-3 rounded-xl bg-gradient-to-br ${badgeColor} border space-y-2 shadow-md`}
             >
               <div className="flex items-center justify-between">
-                <span className={`text-xs font-black ${textColor} uppercase tracking-wider`}>{item.type}</span>
+                <span className={`text-xs font-black ${textColor} uppercase tracking-wider`}>{displayTitle}</span>
                 <span className="text-xs font-extrabold text-slate-100 font-mono">
                   รวม <strong className="text-amber-400">{item.totalCount}</strong> คดี
                 </span>

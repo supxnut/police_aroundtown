@@ -21,7 +21,7 @@ export async function startDiscordLogSync() {
     partials: [Partials.Message, Partials.Channel, Partials.Reaction],
   });
 
-  const isSnowflake = (id: string) => /^\d{17,20}$/.test(id.trim());
+  const isSnowflake = (id: string) => /^\d{17,20}$/.test((id || '').trim());
 
   client.on('ready', async () => {
     console.log('[Discord Sync] Discord Connected');
@@ -79,9 +79,9 @@ export async function startDiscordLogSync() {
               caseId: parsed.caseId,
               caseType: parsed.caseType,
               officerDiscordId: parsed.officerDiscordId,
-              officerUsername: parsed.officerUsername,
+              officerUsername: parsed.officerDiscordId,
               helperDiscordIds: parsed.helperDiscordIds,
-              helperUsernames: parsed.helperUsernames,
+              helperUsernames: parsed.helperDiscordIds,
               image: parsed.image,
               description: parsed.description,
               guildId: parsed.guildId,
@@ -123,76 +123,82 @@ export async function startDiscordLogSync() {
 }
 
 function parseCaseFromEmbed(msg: Message, embed: Embed, guildId: string) {
-  let caseType = 'คดีปกติ';
-  const fullText = `${embed.title || ''} ${embed.description || ''} ${embed.fields?.map(f => `${f.name} ${f.value}`).join(' ') || ''}`;
+  const fullText = `${embed.title || ''} ${embed.description || ''} ${embed.fields?.map((f) => `${f.name} ${f.value}`).join(' ') || ''}`.toLowerCase();
 
-  if (fullText.includes('Take2') || fullText.includes('take2') || fullText.includes('Take 2')) {
-    caseType = 'Take2';
-  } else if (fullText.includes('ส้มแดง') || fullText.includes('Orange-Red')) {
-    caseType = 'ส้มแดง';
-  } else if (fullText.includes('จัดร้าน') || fullText.includes('shop')) {
-    caseType = 'จัดร้าน';
-  } else if (fullText.includes('คดีปกติ') || fullText.includes('คดีทั่วไป')) {
-    caseType = 'คดีปกติ';
+  // Convert case type: คดีปกติ -> normal, Take2 -> take2, ส้มแดง -> red, จัดร้าน -> raid
+  let caseType = 'normal';
+  if (fullText.includes('take2') || fullText.includes('take 2')) {
+    caseType = 'take2';
+  } else if (fullText.includes('ส้มแดง') || fullText.includes('ส้ม-แดง') || fullText.includes('orange-red') || fullText.includes('red')) {
+    caseType = 'red';
+  } else if (fullText.includes('จัดร้าน') || fullText.includes('shop') || fullText.includes('raid')) {
+    caseType = 'raid';
+  } else {
+    caseType = 'normal';
   }
 
   let caseId = `CASE-${msg.id}`;
-  const caseIdMatch = fullText.match(/(?:Case\s*#?|เลขเคส\s*[:#]?|รหัสเคส\s*[:#]?)\s*([A-Za-z0-9-]+)/i);
+  const caseIdMatch = fullText.match(/(?:case\s*#?|เลขเคส\s*[:#]?|รหัสเคส\s*[:#]?)\s*([a-za-z0-9-]+)/i);
   if (caseIdMatch && caseIdMatch[1]) {
-    caseId = caseIdMatch[1];
+    caseId = caseIdMatch[1].toUpperCase();
   }
-
-  const mentionedUsers = Array.from(msg.mentions.users.values());
-
-  let officerDiscordId = '';
-  let officerUsername = '';
-  const helperDiscordIds: string[] = [];
-  const helperUsernames: string[] = [];
 
   let officerFieldVal = '';
   let helperFieldVal = '';
 
   if (embed.fields) {
     for (const field of embed.fields) {
-      const name = field.name.toLowerCase();
-      if (name.includes('ผู้รับผิดชอบ') || name.includes('เจ้าหน้าที่') || name.includes('officer') || name.includes('ผู้บันทึก') || name.includes('ผู้ลง')) {
-        officerFieldVal = field.value;
+      const name = (field.name || '').toLowerCase();
+      if (
+        name.includes('👮') ||
+        name.includes('คนลงคดี') ||
+        name.includes('ผู้รับผิดชอบ') ||
+        name.includes('เจ้าหน้าที่') ||
+        name.includes('officer') ||
+        name.includes('ผู้บันทึก') ||
+        name.includes('ผู้ลง')
+      ) {
+        officerFieldVal += ' ' + field.value;
       }
-      if (name.includes('ผู้ช่วย') || name.includes('ผู้ร่วม') || name.includes('helper') || name.includes('แท็ก')) {
-        helperFieldVal = field.value;
+      if (
+        name.includes('🛠') ||
+        name.includes('ผู้ช่วย') ||
+        name.includes('ผู้ร่วม') ||
+        name.includes('helper') ||
+        name.includes('แท็ก')
+      ) {
+        helperFieldVal += ' ' + field.value;
       }
     }
   }
 
-  // Officer Discord ID extraction
-  const officerMentionMatch = officerFieldVal.match(/<@!?(\d+)>/);
-  if (officerMentionMatch) {
-    officerDiscordId = officerMentionMatch[1];
-    const u = msg.mentions.users.get(officerDiscordId);
-    officerUsername = u ? u.username : officerDiscordId;
-  } else if (mentionedUsers.length > 0) {
-    officerDiscordId = mentionedUsers[0].id;
-    officerUsername = mentionedUsers[0].username;
-  } else if (msg.author) {
-    officerDiscordId = msg.author.id;
-    officerUsername = msg.author.username;
+  // Extract Officer Discord ID from Field 👮 คนลงคดี (mention.user.id)
+  let officerDiscordId = '';
+  const officerMentionMatches = Array.from(officerFieldVal.matchAll(/\d{17,20}/g));
+  if (officerMentionMatches.length > 0) {
+    officerDiscordId = officerMentionMatches[0][0];
+  } else {
+    const mentionedUsers = Array.from(msg.mentions.users.values());
+    if (mentionedUsers.length > 0) {
+      officerDiscordId = mentionedUsers[0].id;
+    } else if (msg.author) {
+      officerDiscordId = msg.author.id;
+    }
   }
 
-  // Helpers Discord IDs extraction
-  const helperMentionMatches = Array.from(helperFieldVal.matchAll(/<@!?(\d+)>/g));
-  for (const match of helperMentionMatches) {
-    const hId = match[1];
+  // Extract Helper Discord IDs from Field 🛠 ผู้ช่วย (mentions.users[])
+  const helperDiscordIds: string[] = [];
+  const helperMentionMatches = Array.from(helperFieldVal.matchAll(/\d{17,20}/g));
+  for (const m of helperMentionMatches) {
+    const hId = m[0];
     if (hId && hId !== officerDiscordId && !helperDiscordIds.includes(hId)) {
       helperDiscordIds.push(hId);
-      const u = msg.mentions.users.get(hId);
-      helperUsernames.push(u ? u.username : hId);
     }
   }
 
-  for (const user of mentionedUsers) {
-    if (user.id !== officerDiscordId && !helperDiscordIds.includes(user.id)) {
-      helperDiscordIds.push(user.id);
-      helperUsernames.push(user.username);
+  for (const [id] of msg.mentions.users) {
+    if (id !== officerDiscordId && !helperDiscordIds.includes(id)) {
+      helperDiscordIds.push(id);
     }
   }
 
@@ -204,12 +210,11 @@ function parseCaseFromEmbed(msg: Message, embed: Embed, guildId: string) {
     caseId,
     caseType,
     officerDiscordId,
-    officerUsername,
     helperDiscordIds,
-    helperUsernames,
     image,
     description,
     guildId,
     createdAt,
   };
 }
+

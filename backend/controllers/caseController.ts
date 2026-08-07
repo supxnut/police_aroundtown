@@ -8,8 +8,20 @@ import { realtimeService } from '../services/realtimeService';
 export const caseController = {
   async getAllCases(req: Request, res: Response) {
     try {
-      const cases = await caseModel.getAll();
-      const totalCount = await caseModel.getCount();
+      const authReq = req as AuthRequest;
+      const queryDiscordId = (req.query.discordId as string) || (req.query.officerDiscordId as string) || '';
+      const requireAll = req.query.all === 'true';
+
+      let discordIdToFilter = queryDiscordId;
+      if (!discordIdToFilter && !requireAll && authReq.user && !authReq.user.isAdmin) {
+        discordIdToFilter = authReq.user.discord_id;
+      }
+
+      const cases = discordIdToFilter
+        ? await caseModel.getByOfficerDiscordId(discordIdToFilter)
+        : await caseModel.getAll();
+
+      const totalCount = cases.length;
       return res.json({ success: true, cases, totalCount });
     } catch (error: any) {
       return res.status(500).json({ success: false, message: error.message });

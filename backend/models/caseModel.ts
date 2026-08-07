@@ -154,6 +154,64 @@ export const caseModel = {
     return row ? formatCaseRow(row) : null;
   },
 
+  async getByOfficerDiscordId(discordId: string): Promise<CaseRow[]> {
+    const extractSnowflake = (str?: string) => {
+      const match = (str || '').match(/\d{17,20}/);
+      return match ? match[0] : '';
+    };
+    const targetSnowflake = extractSnowflake(discordId);
+    if (!targetSnowflake) {
+      return [];
+    }
+
+    const paramPattern = `%${targetSnowflake}%`;
+    const cases = await query(
+      `SELECT * FROM cases 
+       WHERE officer_discord_id = ? 
+          OR officer_discord_id LIKE ? 
+          OR helpers LIKE ? 
+          OR assistant_officer LIKE ? 
+       ORDER BY created_at DESC, id DESC`,
+      [targetSnowflake, paramPattern, paramPattern, paramPattern]
+    );
+
+    const formatted = cases.map(formatCaseRow);
+
+    const filtered = formatted.filter((c: CaseRow) => {
+      const officerSf = extractSnowflake(c.officer_discord_id || c.officerDiscordId || c.officerId || c.officer_in_charge);
+      if (officerSf && officerSf === targetSnowflake) return true;
+
+      let helperText = '';
+      if (typeof c.helpers === 'string') {
+        helperText += ' ' + c.helpers;
+      } else if (Array.isArray(c.helpers)) {
+        helperText += ' ' + JSON.stringify(c.helpers);
+      }
+      if (c.assistant_officer) {
+        helperText += ' ' + c.assistant_officer;
+      }
+      const helperSnowflakes = Array.from(helperText.matchAll(/\d{17,20}/g)).map((m) => m[0]);
+      return helperSnowflakes.includes(targetSnowflake);
+    });
+
+    const caseIds = filtered.map((c: any) => c.id);
+    if (caseIds.length > 0) {
+      const alertMap = await alertModel.getAlertsByCaseIds(caseIds);
+      return filtered.map((c: CaseRow) => {
+        const alertRow = alertMap[c.id];
+        return {
+          ...c,
+          has_alert: alertRow ? alertRow.status === 'PENDING' : false,
+          alert_type: alertRow ? alertRow.alert_type : null,
+          alert_message: alertRow ? alertRow.message : null,
+          alert_status: alertRow ? alertRow.status : null,
+        };
+      });
+    }
+
+    return filtered;
+  },
+
   async createFromBot(data: {
     caseId?: string;
     case_number?: string;
@@ -402,7 +460,7 @@ export const caseModel = {
     startDate?: string,
     endDate?: string
   ): Promise<OfficerStatsSummary> {
-    const allCases = await this.getAll();
+    const allCases = await this.getByOfficerDiscordId(officerDiscordId);
 
     // Date filtering logic
     const filteredCases = allCases.filter((c) => {
@@ -441,47 +499,60 @@ export const caseModel = {
       return true;
     });
 
-    // Standard case types required by the prompt
-    const defaultTypes = ['คดีปกติ', 'Take2', 'ส้มแดง', 'จัดร้าน'];
-    const typeStatsMap: Record<string, { selfCount: number; helperCount: number }> = {};
+    // Standard case types required by the prompt: normal, take2, red, raid
+    const typeStatsMap: Record<string, { selfCount: number; helperCount: number }> = {
+      normal: { selfCount: 0, helperCount: 0 },
+      take2: { selfCount: 0, helperCount: 0 },
+      red: { selfCount: 0, helperCount: 0 },
+      raid: { selfCount: 0, helperCount: 0 },
+    };
 
-    defaultTypes.forEach((t) => {
-      typeStatsMap[t] = { selfCount: 0, helperCount: 0 };
-    });
+    const extractSnowflake = (str?: string) => {
+      const match = (str || '').match(/\d{17,20}/);
+      return match ? match[0] : '';
+    };
 
-    const cleanOfficerId = (officerDiscordId || '').trim();
+    const userSnowflake = extractSnowflake(officerDiscordId);
     let totalAllCases = 0;
 
     filteredCases.forEach((c) => {
-      const cType = c.case_type || c.type || 'คดีปกติ';
-      if (!typeStatsMap[cType]) {
-        typeStatsMap[cType] = { selfCount: 0, helperCount: 0 };
+      const rawType = (c.case_type || c.type || '').toLowerCase().trim();
+      let normType = 'normal';
+      if (rawType === 'take2' || rawType.includes('take2')) normType = 'take2';
+      else if (rawType === 'red' || rawType.includes('ส้ม') || rawType.includes('red') || rawType.includes('orange')) normType = 'red';
+      else if (rawType === 'raid' || rawType.includes('จัดร้าน') || rawType.includes('shop') || rawType.includes('raid')) normType = 'raid';
+      else normType = 'normal';
+
+      if (!typeStatsMap[normType]) {
+        typeStatsMap[normType] = { selfCount: 0, helperCount: 0 };
       }
 
-      // Check if primary officer (ลงเอง) strictly by Discord Snowflake ID
-      const cOfficerId = (c.officer_discord_id || c.officerDiscordId || c.officerId || '').trim();
-      const isPrimary = Boolean(cleanOfficerId && cOfficerId === cleanOfficerId);
+      // Check primary officer (ลงเอง) strictly by Discord Snowflake ID
+      const rawOfficer = c.officer_discord_id || c.officerDiscordId || c.officerId || c.officer_in_charge || '';
+      const officerSnowflake = extractSnowflake(rawOfficer);
+      const isPrimary = Boolean(userSnowflake && officerSnowflake && officerSnowflake === userSnowflake);
 
-      // Check if helper (ถูกแท็ก) strictly by Discord Snowflake ID
+      // Check helper (ถูกแท็ก) strictly by Discord Snowflake ID
       let isHelper = false;
-      if (!isPrimary && cleanOfficerId && Array.isArray(c.helpers)) {
-        isHelper = c.helpers.some((h: any) => {
-          if (typeof h === 'string') {
-            return h.trim() === cleanOfficerId;
-          }
-          if (typeof h === 'object' && h !== null) {
-            const hId = (h.discord_id || h.discordId || h.id || '').toString().trim();
-            return hId === cleanOfficerId;
-          }
-          return false;
-        });
+      if (!isPrimary && userSnowflake) {
+        let helperStr = '';
+        if (typeof c.helpers === 'string') {
+          helperStr += ' ' + c.helpers;
+        } else if (Array.isArray(c.helpers)) {
+          helperStr += ' ' + JSON.stringify(c.helpers);
+        }
+        if (c.assistant_officer) {
+          helperStr += ' ' + c.assistant_officer;
+        }
+        const helperMatches = Array.from(helperStr.matchAll(/\d{17,20}/g)).map((m) => m[0]);
+        isHelper = helperMatches.includes(userSnowflake);
       }
 
       if (isPrimary) {
-        typeStatsMap[cType].selfCount += 1;
+        typeStatsMap[normType].selfCount += 1;
         totalAllCases += 1;
       } else if (isHelper) {
-        typeStatsMap[cType].helperCount += 1;
+        typeStatsMap[normType].helperCount += 1;
         totalAllCases += 1;
       }
     });

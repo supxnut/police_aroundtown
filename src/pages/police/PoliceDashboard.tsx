@@ -30,9 +30,10 @@ export const PoliceDashboard: React.FC = () => {
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
+      const discordId = user?.discord_id || '';
       const [dutyRes, caseRes, actRes] = await Promise.all([
         api.get('/duty/my'),
-        api.get('/cases'),
+        api.get('/cases', { params: { discordId } }),
         api.get('/activities/police'),
       ]);
 
@@ -50,7 +51,7 @@ export const PoliceDashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [user?.discord_id]);
 
   useEffect(() => {
     fetchData();
@@ -107,59 +108,62 @@ export const PoliceDashboard: React.FC = () => {
     return Object.values(hoursPerDay).filter((hrs) => hrs >= 3).length;
   }, [filteredDutyLogs]);
 
-  // Calculate Officer Summary Performance Breakdown (คดีปกติ, Take2, ส้มแดง, จัดร้าน)
+  // Calculate Officer Summary Performance Breakdown (normal, take2, red, raid)
   const officerPerformanceStats = useMemo(() => {
     if (!user) return { breakdown: [], totalCases: 0 };
 
-    const defaultTypes = ['คดีปกติ', 'Take2', 'ส้มแดง', 'จัดร้าน'];
-    const map: Record<string, { selfCount: number; helperCount: number }> = {};
-    defaultTypes.forEach((t) => {
-      map[t] = { selfCount: 0, helperCount: 0 };
-    });
+    const map: Record<string, { selfCount: number; helperCount: number }> = {
+      normal: { selfCount: 0, helperCount: 0 },
+      take2: { selfCount: 0, helperCount: 0 },
+      red: { selfCount: 0, helperCount: 0 },
+      raid: { selfCount: 0, helperCount: 0 },
+    };
 
-    const userDiscordId = (user.discord_id || '').trim();
+    const extractSnowflake = (str?: string) => {
+      const match = (str || '').match(/\d{17,20}/);
+      return match ? match[0] : '';
+    };
+
+    const userSnowflake = extractSnowflake(user.discord_id);
     let totalCasesCount = 0;
 
     filteredCases.forEach((c) => {
-      const cType = c.type || c.case_type || 'คดีปกติ';
-      if (!map[cType]) {
-        map[cType] = { selfCount: 0, helperCount: 0 };
+      const rawType = (c.type || c.case_type || '').toLowerCase().trim();
+      let normType = 'normal';
+      if (rawType === 'take2' || rawType.includes('take2')) normType = 'take2';
+      else if (rawType === 'red' || rawType.includes('ส้ม') || rawType.includes('red') || rawType.includes('orange')) normType = 'red';
+      else if (rawType === 'raid' || rawType.includes('จัดร้าน') || rawType.includes('shop') || rawType.includes('raid')) normType = 'raid';
+      else normType = 'normal';
+
+      if (!map[normType]) {
+        map[normType] = { selfCount: 0, helperCount: 0 };
       }
 
-      const cOfficerId = (c.officer_discord_id || c.officerDiscordId || c.officerId || '').trim();
-      const isPrimary = Boolean(userDiscordId && cOfficerId === userDiscordId);
+      const rawOfficer = c.officer_discord_id || c.officerDiscordId || c.officerId || c.officer_in_charge || '';
+      const officerSnowflake = extractSnowflake(rawOfficer);
+      const isPrimary = Boolean(userSnowflake && officerSnowflake && officerSnowflake === userSnowflake);
 
-      // Check if helper (ถูกแท็ก) strictly by Discord Snowflake ID
+      // Check helper (ถูกแท็ก) strictly by Discord Snowflake ID
       let isHelper = false;
-      let helpersList: any[] = [];
-      if (Array.isArray(c.helpers)) {
-        helpersList = c.helpers;
-      } else if (typeof c.helpers === 'string' && (c.helpers as string).trim()) {
-        try {
-          helpersList = JSON.parse(c.helpers);
-        } catch (_) {
-          helpersList = (c.helpers as string).split(',').map((h) => ({ id: h.trim(), discord_id: h.trim() }));
+      if (!isPrimary && userSnowflake) {
+        let helperStr = '';
+        if (typeof c.helpers === 'string') {
+          helperStr += ' ' + c.helpers;
+        } else if (Array.isArray(c.helpers)) {
+          helperStr += ' ' + JSON.stringify(c.helpers);
         }
-      }
-
-      if (!isPrimary && userDiscordId && helpersList.length > 0) {
-        isHelper = helpersList.some((h: any) => {
-          if (typeof h === 'string') {
-            return h.trim() === userDiscordId;
-          }
-          if (typeof h === 'object' && h !== null) {
-            const hId = (h.discord_id || h.discordId || h.id || '').toString().trim();
-            return hId === userDiscordId;
-          }
-          return false;
-        });
+        if (c.assistant_officer) {
+          helperStr += ' ' + c.assistant_officer;
+        }
+        const helperMatches = Array.from(helperStr.matchAll(/\d{17,20}/g)).map((m) => m[0]);
+        isHelper = helperMatches.includes(userSnowflake);
       }
 
       if (isPrimary) {
-        map[cType].selfCount += 1;
+        map[normType].selfCount += 1;
         totalCasesCount += 1;
       } else if (isHelper) {
-        map[cType].helperCount += 1;
+        map[normType].helperCount += 1;
         totalCasesCount += 1;
       }
     });
