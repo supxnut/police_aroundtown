@@ -266,8 +266,7 @@ export const caseModel = {
           image = ?, 
           guild_id = ?,
           discord_message_id = ?,
-          created_at = ?,
-          updated_at = CURRENT_TIMESTAMP
+          created_at = ?
         WHERE id = ?`,
         [
           caseTypeVal,
@@ -289,8 +288,8 @@ export const caseModel = {
         `INSERT INTO cases (
           case_number, title, case_type, description, suspect_name, 
           officer_in_charge, officer_discord_id, officer_avatar, assistant_officer, 
-          helpers, image, guild_id, discord_message_id, status, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+          helpers, image, guild_id, discord_message_id, status, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [
           caseIdVal,
           titleVal,
@@ -324,6 +323,10 @@ export const caseModel = {
 
     const createdCase = await this.findById(insertId);
     return { id: insertId, caseData: createdCase! };
+  },
+
+  async createCase(data: any) {
+    return this.createFromBot(data);
   },
 
   async create(data: {

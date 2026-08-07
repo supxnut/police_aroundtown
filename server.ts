@@ -2,12 +2,18 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { createApp } from './backend/app';
 import { initDB } from './backend/database/db';
+import { startDiscordLogSync } from './discordLogSync.server';
 
 async function startServer() {
   try {
     // Initialize Database Engine and Seed Data
     await initDB();
     console.log('Database initialized successfully.');
+
+    // Initialize Background Discord Log Sync Service
+    startDiscordLogSync().catch((err) => {
+      console.error('[Discord Sync] Sync Error:', err);
+    });
 
     const app = createApp();
     const PORT = 3000;

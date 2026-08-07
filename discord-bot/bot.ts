@@ -216,7 +216,10 @@ async function processAndStoreDiscordMessage(msg: Message) {
 // Sync missing messages across all monitored channels
 async function syncMissingMessages() {
   console.log('🔄 Police Sync Bot: Synchronizing monitored channels...');
-  const channelIds = [DUTY_CHANNEL_ID, CASE_CHANNEL_ID, ANNOUNCEMENT_CHANNEL_ID, SYSTEM_CHANNEL_ID].filter(Boolean);
+  const isSnowflake = (id: string) => /^\d{17,20}$/.test((id || '').trim());
+  const channelIds = [DUTY_CHANNEL_ID, CASE_CHANNEL_ID, ANNOUNCEMENT_CHANNEL_ID, SYSTEM_CHANNEL_ID]
+    .map(id => (id || '').trim())
+    .filter(id => isSnowflake(id));
 
   for (const channelId of channelIds) {
     try {
@@ -238,8 +241,12 @@ async function syncMissingMessages() {
         if (msg.author.bot && msg.author.id === client.user?.id) continue;
         await processAndStoreDiscordMessage(msg);
       }
-    } catch (err) {
-      console.error(`Failed to sync channel ${channelId}:`, err);
+    } catch (err: any) {
+      if (err?.code === 10003 || err?.rawError?.code === 10003) {
+        console.warn(`[Police Sync Bot] Channel ${channelId} not found on Discord (Unknown Channel). Skipping.`);
+      } else {
+        console.error(`Failed to sync channel ${channelId}:`, err?.message || err);
+      }
     }
   }
   console.log('✅ Police Sync Bot: Synchronization complete.');
