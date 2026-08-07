@@ -1,14 +1,15 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertOctagon, Lock, UserX } from 'lucide-react';
+import { AlertOctagon, KeyRound, Lock, LogIn, UserX } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../api/axios';
 
 export const LoginPage: React.FC = () => {
-  const { user, isAdmin, loading: authLoading, checkAuth } = useAuth();
+  const { user, isAdmin, loading: authLoading, loginWithDiscordId, checkAuth } = useAuth();
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [discordIdInput, setDiscordIdInput] = useState('');
   const [hasUsers, setHasUsers] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -61,6 +62,31 @@ export const LoginPage: React.FC = () => {
       setError(err.response?.data?.message || 'เกิดข้อผิดพลาดในการเชื่อมต่อ Discord OAuth2');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleLoginSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanId = discordIdInput.trim();
+    if (!cleanId) {
+      setError('กรุณากรอก Discord ID เพื่อเข้าสู่ระบบ');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+
+    const result = await loginWithDiscordId(cleanId);
+    setLoading(false);
+
+    if (result.success) {
+      if (result.isAdmin) {
+        navigate('/admin/dashboard', { replace: true });
+      } else {
+        navigate('/police/dashboard', { replace: true });
+      }
+    } else {
+      setError(result.message || 'คุณไม่มีสิทธิ์ในการเข้าถึงระบบนี้ (ไม่พบ Discord ID ในระบบ)');
     }
   };
 
@@ -131,6 +157,41 @@ export const LoginPage: React.FC = () => {
             </svg>
             <span>{loading ? 'กำลังเชื่อมต่อ Discord...' : 'Login with Discord'}</span>
           </button>
+
+          <div className="relative flex items-center justify-center my-4">
+            <div className="border-t border-slate-800 w-full" />
+            <span className="bg-slate-900 px-3 text-[10px] text-slate-400 font-bold uppercase tracking-wider absolute">หรือเข้าใช้งานด้วย Discord ID</span>
+          </div>
+
+          {/* Direct Discord ID Form */}
+          <form onSubmit={handleLoginSubmit} className="space-y-4 pt-1">
+            <div className="space-y-1.5">
+              <label className="block text-xs font-bold text-slate-300 flex items-center justify-between">
+                <span>Discord ID ของเจ้าหน้าที่:</span>
+                <span className="text-[10px] text-slate-400 font-mono">18-19 หลัก</span>
+              </label>
+              <div className="relative flex items-center">
+                <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 pointer-events-none" />
+                <input
+                  type="text"
+                  value={discordIdInput}
+                  onChange={(e) => setDiscordIdInput(e.target.value)}
+                  placeholder="กรอก Discord ID ของคุณ..."
+                  required
+                  className="w-full bg-slate-950 border border-slate-700 focus:border-rose-500 rounded-xl py-3 pl-10 pr-3 text-xs text-slate-100 placeholder-slate-400 font-mono focus:outline-none transition-colors"
+                />
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading || !discordIdInput.trim()}
+              className="w-full py-3 px-6 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white font-extrabold text-xs transition-all duration-200 shadow-lg shadow-rose-600/20 flex items-center justify-center space-x-2 disabled:opacity-50 cursor-pointer"
+            >
+              <LogIn className="w-4 h-4" />
+              <span>{loading ? 'กำลังตรวจสอบสิทธิ์...' : 'เข้าสู่ระบบด้วย Discord ID'}</span>
+            </button>
+          </form>
         </div>
       </div>
     </div>

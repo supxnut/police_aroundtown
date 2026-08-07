@@ -7,15 +7,20 @@ export const authService = {
     console.log(`[Auth Service] Verifying authorization for Discord ID: ${discordId}`);
     let user = await userModel.findByDiscordId(discordId);
 
-    const isAdmin = config.adminDiscordIds.includes(discordId);
+    const totalUsers = await userModel.countAll();
+    const isEnvAdmin = config.adminDiscordIds.includes(discordId);
 
-    // If user does not exist in database and is not in admin env list, reject login
+    // If no user exists in database at all, grant initial admin to the first logging in Discord account
+    const isFirstUser = totalUsers === 0;
+    const isAdmin = isEnvAdmin || isFirstUser;
+
+    // If user does not exist in database and is not an admin, reject login
     if (!user && !isAdmin) {
       console.warn(`[Auth Service] Authorization failed: Discord ID ${discordId} not found in database and not in DISCORD_ADMIN_IDS`);
-      throw new Error('คุณไม่มีสิทธิ์ในการเข้าถึงระบบนี้ (You do not have permission to access this system.)');
+      throw new Error('คุณไม่มีสิทธิ์ในการเข้าถึงระบบนี้ (ไม่พบ Discord ID ในระบบ)');
     }
 
-    // If user does not exist in database but is listed in admin env list, create admin record
+    // If user does not exist in database but is an admin, create admin record
     if (!user && isAdmin) {
       console.log(`[Auth Service] Auto-creating admin user record for Discord ID: ${discordId}`);
       const today = new Date().toISOString().split('T')[0];
@@ -23,7 +28,7 @@ export const authService = {
 
       const insertId = await userModel.create({
         discord_id: discordId,
-        fullname: username || `Admin (${discordId.slice(-4)})`,
+        fullname: username || `Chief Admin (${discordId.slice(-4)})`,
         rank: 'Chief of Police',
         start_date: today,
         avatar: avatarUrl,
@@ -34,7 +39,7 @@ export const authService = {
     }
 
     if (!user) {
-      throw new Error('คุณไม่มีสิทธิ์ในการเข้าถึงระบบนี้ (You do not have permission to access this system.)');
+      throw new Error('คุณไม่มีสิทธิ์ในการเข้าถึงระบบนี้ (ไม่พบข้อมูลผู้ใช้งาน)');
     }
 
     // If user exists and avatar is provided via Discord OAuth, update avatar
@@ -48,7 +53,7 @@ export const authService = {
       throw new Error('บัญชีของคุณถูกระงับการใช้งาน กรุณาติดต่อผู้บังคับบัญชา');
     }
 
-    const isUserAdmin = isAdmin || user.rank === 'Chief of Police';
+    const isUserAdmin = isAdmin || user.rank === 'Chief of Police' || isEnvAdmin;
     console.log(`[Auth Service] Login authorized for ${user.fullname} (${user.discord_id}), isAdmin: ${isUserAdmin}`);
 
     const payload = {

@@ -8,8 +8,8 @@ const getAppUrl = (req: Request): string => {
   if (process.env.APP_URL) {
     return process.env.APP_URL.replace(/\/$/, '');
   }
-  const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-  const host = req.get('host');
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+  const host = req.get('host') || 'localhost:3000';
   return `${protocol}://${host}`;
 };
 
@@ -17,7 +17,9 @@ const getRedirectUri = (req: Request): string => {
   if (process.env.DISCORD_REDIRECT_URI) {
     return process.env.DISCORD_REDIRECT_URI;
   }
-  const appUrl = getAppUrl(req);
+  const appUrl = process.env.APP_URL
+    ? process.env.APP_URL.replace(/\/$/, '')
+    : getAppUrl(req);
   return `${appUrl}/api/auth/discord/callback`;
 };
 
@@ -32,6 +34,9 @@ export const authController = {
     const clientId = process.env.DISCORD_CLIENT_ID || config.discord.clientId;
     const redirectUri = getRedirectUri(req);
 
+    console.log("APP_URL =", process.env.APP_URL);
+    console.log("DISCORD_REDIRECT_URI =", process.env.DISCORD_REDIRECT_URI);
+    console.log("OAuth Redirect URI =", redirectUri);
     console.log(`[Discord OAuth] Requesting OAuth URL - Client ID: ${clientId ? 'Present' : 'Missing'}, Redirect URI: ${redirectUri}`);
 
     if (!clientId) {
@@ -53,7 +58,8 @@ export const authController = {
     return res.json({
       success: true,
       configured: true,
-      url
+      url,
+      redirectUri
     });
   },
 

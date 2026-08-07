@@ -6,6 +6,7 @@ const router = Router();
 
 router.get('/discord/url', authController.getDiscordOAuthUrl);
 router.get('/discord/oauth-redirect', authController.discordOAuthRedirect);
+router.get('/discord/callback', authController.discordCallback);
 router.post('/discord/callback', authController.discordCallback);
 router.get('/system-status', authController.systemStatus);
 router.post('/dev-login', authController.devLogin);
