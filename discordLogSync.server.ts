@@ -123,82 +123,72 @@ export async function startDiscordLogSync() {
 }
 
 function parseCaseFromEmbed(msg: Message, embed: Embed, guildId: string) {
-  const fullText = `${embed.title || ''} ${embed.description || ''} ${embed.fields?.map((f) => `${f.name} ${f.value}`).join(' ') || ''}`.toLowerCase();
+  const rawText = [
+    msg.content || '',
+    embed.title || '',
+    embed.description || '',
+    ...(embed.fields?.map((f) => `${f.name}\n${f.value}`) || []),
+  ].join('\n');
+
+  const lowerText = rawText.toLowerCase();
 
   // Convert case type: คดีปกติ -> normal, Take2 -> take2, ส้มแดง -> red, จัดร้าน -> raid
   let caseType = 'normal';
-  if (fullText.includes('take2') || fullText.includes('take 2')) {
+  if (lowerText.includes('take2') || lowerText.includes('take 2')) {
     caseType = 'take2';
-  } else if (fullText.includes('ส้มแดง') || fullText.includes('ส้ม-แดง') || fullText.includes('orange-red') || fullText.includes('red')) {
+  } else if (lowerText.includes('ส้มแดง') || lowerText.includes('ส้ม-แดง') || lowerText.includes('orange-red') || lowerText.includes('red')) {
     caseType = 'red';
-  } else if (fullText.includes('จัดร้าน') || fullText.includes('shop') || fullText.includes('raid')) {
+  } else if (lowerText.includes('จัดร้าน') || lowerText.includes('shop') || lowerText.includes('raid')) {
     caseType = 'raid';
   } else {
     caseType = 'normal';
   }
 
   let caseId = `CASE-${msg.id}`;
-  const caseIdMatch = fullText.match(/(?:case\s*#?|เลขเคส\s*[:#]?|รหัสเคส\s*[:#]?)\s*([a-za-z0-9-]+)/i);
+  const caseIdMatch = rawText.match(/(?:case\s*#?|เลขเคส\s*[:#]?|รหัสเคส\s*[:#]?)\s*([a-zA-Z0-9-]+)/i);
   if (caseIdMatch && caseIdMatch[1]) {
     caseId = caseIdMatch[1].toUpperCase();
   }
 
-  let officerFieldVal = '';
-  let helperFieldVal = '';
-
-  if (embed.fields) {
-    for (const field of embed.fields) {
-      const name = (field.name || '').toLowerCase();
-      if (
-        name.includes('👮') ||
-        name.includes('คนลงคดี') ||
-        name.includes('ผู้รับผิดชอบ') ||
-        name.includes('เจ้าหน้าที่') ||
-        name.includes('officer') ||
-        name.includes('ผู้บันทึก') ||
-        name.includes('ผู้ลง')
-      ) {
-        officerFieldVal += ' ' + field.value;
-      }
-      if (
-        name.includes('🛠') ||
-        name.includes('ผู้ช่วย') ||
-        name.includes('ผู้ร่วม') ||
-        name.includes('helper') ||
-        name.includes('แท็ก')
-      ) {
-        helperFieldVal += ' ' + field.value;
-      }
-    }
-  }
-
-  // Extract Officer Discord ID from Field 👮 คนลงคดี (mention.user.id)
+  // 1. Extract officer Discord ID using required regex: /👮\s*คนลงคดี[\s\S]*?<@!?(\d+)>/
   let officerDiscordId = '';
-  const officerMentionMatches = Array.from(officerFieldVal.matchAll(/\d{17,20}/g));
-  if (officerMentionMatches.length > 0) {
-    officerDiscordId = officerMentionMatches[0][0];
+  const officerRegex = /👮\s*คนลงคดี[\s\S]*?<@!?(\d+)>/;
+  const officerMatch = rawText.match(officerRegex);
+  if (officerMatch && officerMatch[1]) {
+    officerDiscordId = officerMatch[1];
   } else {
-    const mentionedUsers = Array.from(msg.mentions.users.values());
-    if (mentionedUsers.length > 0) {
-      officerDiscordId = mentionedUsers[0].id;
-    } else if (msg.author) {
-      officerDiscordId = msg.author.id;
+    // Fallback search for mention after officer keywords (NEVER use message.id or author.id)
+    const altOfficerMatch = rawText.match(/(?:คนลงคดี|ผู้ลงคดี|เจ้าหน้าที่|officer)[\s\S]*?<@!?(\d+)>/i);
+    if (altOfficerMatch && altOfficerMatch[1]) {
+      officerDiscordId = altOfficerMatch[1];
     }
   }
 
-  // Extract Helper Discord IDs from Field 🛠 ผู้ช่วย (mentions.users[])
+  // 2. Extract helper Discord IDs using required regex: /<@!?(\d+)>/g inside "ผู้ช่วย" section
   const helperDiscordIds: string[] = [];
-  const helperMentionMatches = Array.from(helperFieldVal.matchAll(/\d{17,20}/g));
-  for (const m of helperMentionMatches) {
-    const hId = m[0];
+  let helperSection = '';
+
+  // Check embed fields first
+  if (embed.fields) {
+    for (const f of embed.fields) {
+      if ((f.name || '').includes('ผู้ช่วย') || (f.name || '').includes('🛠') || (f.name || '').toLowerCase().includes('helper')) {
+        helperSection += '\n' + f.value;
+      }
+    }
+  }
+
+  // Also search rawText for ผู้ช่วย section
+  const helperSectionMatch = rawText.match(/(?:🛠\s*)?ผู้ช่วย[\s\S]*/i);
+  if (helperSectionMatch) {
+    helperSection += '\n' + helperSectionMatch[0].split(/\n[🕒📁📋⏰]/)[0];
+  }
+
+  const helperRegex = /<@!?(\d+)>/g;
+  let hm;
+  while ((hm = helperRegex.exec(helperSection)) !== null) {
+    const hId = hm[1];
     if (hId && hId !== officerDiscordId && !helperDiscordIds.includes(hId)) {
       helperDiscordIds.push(hId);
-    }
-  }
-
-  for (const [id] of msg.mentions.users) {
-    if (id !== officerDiscordId && !helperDiscordIds.includes(id)) {
-      helperDiscordIds.push(id);
     }
   }
 

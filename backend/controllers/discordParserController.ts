@@ -177,6 +177,36 @@ export async function parseDiscordLog(rawLogText: string) {
         }
       }
 
+      // Extract officer_discord_id using regex: /👮\s*คนลงคดี[\s\S]*?<@!?(\d+)>/
+      let officerDiscordId = '';
+      const officerMatch = rawLogText.match(/👮\s*คนลงคดี[\s\S]*?<@!?(\d+)>/);
+      if (officerMatch && officerMatch[1]) {
+        officerDiscordId = officerMatch[1];
+      } else {
+        const altOfficerMatch = rawLogText.match(/(?:คนลงคดี|ผู้ลงคดี|เจ้าหน้าที่|officer)[\s\S]*?<@!?(\d+)>/i);
+        if (altOfficerMatch && altOfficerMatch[1]) {
+          officerDiscordId = altOfficerMatch[1];
+        }
+      }
+      parsed.officer_discord_id = officerDiscordId;
+
+      // Extract helper Discord IDs using regex: /<@!?(\d+)>/g inside "ผู้ช่วย" section
+      let helperSection = '';
+      const helperSectionMatch = rawLogText.match(/(?:🛠\s*)?ผู้ช่วย[\s\S]*/i);
+      if (helperSectionMatch) {
+        helperSection = helperSectionMatch[0].split(/\n[🕒📁📋⏰]/)[0];
+      }
+      const helperDiscordIds: string[] = [];
+      const helperRegex = /<@!?(\d+)>/g;
+      let hm;
+      while ((hm = helperRegex.exec(helperSection)) !== null) {
+        const hId = hm[1];
+        if (hId && hId !== officerDiscordId && !helperDiscordIds.includes(hId)) {
+          helperDiscordIds.push(hId);
+        }
+      }
+      parsed.helpers = helperDiscordIds;
+
       // Ensure mandatory fields exist
       const mandatoryKeys = [
         'case_number',

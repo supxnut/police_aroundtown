@@ -57,28 +57,129 @@ export interface OfficerStatsSummary {
   totalAllCases: number;
 }
 
+async function getUserMap(): Promise<Map<string, { fullname: string; avatar: string }>> {
+  const map = new Map<string, { fullname: string; avatar: string }>();
+  try {
+    const users = await query('SELECT discord_id, fullname, avatar FROM users');
+    for (const u of users) {
+      if (u.discord_id && u.discord_id.trim()) {
+        map.set(u.discord_id.trim(), { fullname: u.fullname || '', avatar: u.avatar || '' });
+      }
+    }
+  } catch (_) {}
+  return map;
+}
+
 // Helper to format case row with standard camelCase and snake_case properties
-function formatCaseRow(row: any): CaseRow {
+function formatCaseRowWithUserMap(row: any, userMap?: Map<string, { fullname: string; avatar: string }>): CaseRow {
   if (!row) return row;
+
+  let description = row.description || '';
+
+  // 1. Extract officer Discord ID using required regex: /👮\s*คนลงคดี[\s\S]*?<@!?(\d+)>/
+  let officerIdVal = row.officer_discord_id || row.officerDiscordId || row.officerId || '';
+  const officerMatch = description.match(/👮\s*คนลงคดี[\s\S]*?<@!?(\d+)>/);
+  if (officerMatch && officerMatch[1]) {
+    officerIdVal = officerMatch[1];
+  } else {
+    // If officerIdVal is equal to message id or missing, check fallback regex
+    if (!/^\d{17,20}$/.test(officerIdVal) || officerIdVal === row.discord_message_id) {
+      const altMatch = description.match(/(?:คนลงคดี|ผู้ลงคดี|เจ้าหน้าที่|officer)[\s\S]*?<@!?(\d+)>/i);
+      if (altMatch && altMatch[1]) {
+        officerIdVal = altMatch[1];
+      }
+    }
+  }
+
+  // 2. Extract Helpers using required regex: /<@!?(\d+)>/g inside "ผู้ช่วย" section
+  let helperSection = '';
+  const helperSectionMatch = description.match(/(?:🛠\s*)?ผู้ช่วย[\s\S]*/i);
+  if (helperSectionMatch) {
+    helperSection = helperSectionMatch[0].split(/\n[🕒📁📋⏰]/)[0];
+  }
+  const helperIdsFromDesc: string[] = [];
+  const helperRegex = /<@!?(\d+)>/g;
+  let hm;
+  while ((hm = helperRegex.exec(helperSection)) !== null) {
+    const hId = hm[1];
+    if (hId && hId !== officerIdVal && !helperIdsFromDesc.includes(hId)) {
+      helperIdsFromDesc.push(hId);
+    }
+  }
 
   let parsedHelpers: HelperInfo[] = [];
   if (row.helpers) {
     if (typeof row.helpers === 'string') {
       try {
-        parsedHelpers = JSON.parse(row.helpers);
+        const json = JSON.parse(row.helpers);
+        if (Array.isArray(json)) {
+          parsedHelpers = json.map((h: any) => {
+            const rawId = typeof h === 'string' ? h : h.discord_id || h.id || h.name || '';
+            const cleanId = (String(rawId).match(/\d{17,20}/) || [])[0] || String(rawId);
+            return { discord_id: cleanId, id: cleanId, name: cleanId };
+          });
+        }
       } catch (_) {
-        parsedHelpers = row.helpers.split(',').map((h: string) => ({ name: h.trim() }));
+        parsedHelpers = row.helpers.split(',').map((h: string) => {
+          const rawId = h.trim();
+          const cleanId = (rawId.match(/\d{17,20}/) || [])[0] || rawId;
+          return { discord_id: cleanId, id: cleanId, name: cleanId };
+        });
       }
     } else if (Array.isArray(row.helpers)) {
-      parsedHelpers = row.helpers;
+      parsedHelpers = row.helpers.map((h: any) => {
+        const rawId = typeof h === 'string' ? h : h.discord_id || h.id || h.name || '';
+        const cleanId = (String(rawId).match(/\d{17,20}/) || [])[0] || String(rawId);
+        return { discord_id: cleanId, id: cleanId, name: cleanId };
+      });
     }
   }
 
+  if (parsedHelpers.length === 0 && helperIdsFromDesc.length > 0) {
+    parsedHelpers = helperIdsFromDesc.map((hId) => ({ discord_id: hId, id: hId, name: hId }));
+  }
+
+  // Officer name & avatar resolution
+  let officerNameVal = 'ไม่ระบุ';
+  let officerAvatarVal = row.officer_avatar || row.officerAvatar || '';
+
+  if (userMap && officerIdVal && userMap.has(officerIdVal)) {
+    const user = userMap.get(officerIdVal)!;
+    officerNameVal = user.fullname;
+    officerAvatarVal = user.avatar || officerAvatarVal;
+  } else if (row.officer_in_charge && !row.officer_in_charge.includes('<@') && !/^\d{17,20}$/.test(row.officer_in_charge) && row.officer_in_charge !== row.discord_message_id) {
+    officerNameVal = row.officer_in_charge;
+  } else if (officerIdVal) {
+    officerNameVal = officerIdVal;
+  }
+
+  // Helpers resolution with userMap
+  parsedHelpers = parsedHelpers.map((h) => {
+    const rawId = h.discord_id || h.id || (typeof h.name === 'string' ? (h.name.match(/\d{17,20}/) || [])[0] : '');
+    const cleanId = String(rawId || '').replace(/<@!?(\d+)>/g, '$1');
+    if (userMap && cleanId && userMap.has(cleanId)) {
+      const user = userMap.get(cleanId)!;
+      return {
+        ...h,
+        discord_id: cleanId,
+        id: cleanId,
+        name: user.fullname,
+        avatar: user.avatar,
+      };
+    }
+    return {
+      ...h,
+      discord_id: cleanId,
+      id: cleanId,
+      name: cleanId || 'ไม่ระบุ',
+    };
+  });
+
+  // 5. Clean Discord mention tags from description
+  description = description.replace(/<@!?(\d+)>/g, '$1');
+
   const caseIdVal = row.case_number || row.caseId || `CASE-${row.id}`;
   const caseTypeVal = row.case_type || row.type || row.caseType || 'คดีปกติ';
-  const officerNameVal = row.officer_in_charge || row.officerName || 'ไม่ระบุ';
-  const officerIdVal = row.officer_discord_id || row.officerDiscordId || row.officerId || '';
-  const officerAvatarVal = row.officer_avatar || row.officerAvatar || '';
   const imageVal = row.image || '';
   const discordMsgIdVal = row.discord_message_id || row.discordMessageId || row.messageId || '';
   const guildIdVal = row.guild_id || row.guildId || '';
@@ -92,7 +193,7 @@ function formatCaseRow(row: any): CaseRow {
     title: row.title || caseTypeVal + ' ' + caseIdVal,
     type: caseTypeVal,
     case_type: caseTypeVal,
-    description: row.description || '',
+    description,
     suspect_name: row.suspect_name || 'ไม่ระบุ',
     officer_in_charge: officerNameVal,
     officerName: officerNameVal,
@@ -102,7 +203,7 @@ function formatCaseRow(row: any): CaseRow {
     officer_avatar: officerAvatarVal,
     officerAvatar: officerAvatarVal,
     helpers: parsedHelpers,
-    assistant_officer: row.assistant_officer || (parsedHelpers.map((h: any) => h.name || h.id || h).join(', ') || 'ไม่มี'),
+    assistant_officer: parsedHelpers.map((h: any) => h.name || h.discord_id || h.id).join(', ') || 'ไม่มี',
     image: imageVal,
     discord_message_id: discordMsgIdVal,
     discordMessageId: discordMsgIdVal,
@@ -117,11 +218,21 @@ function formatCaseRow(row: any): CaseRow {
   };
 }
 
+async function formatCaseRows(rows: any[]): Promise<CaseRow[]> {
+  if (!rows || rows.length === 0) return [];
+  const userMap = await getUserMap();
+  return rows.map((r) => formatCaseRowWithUserMap(r, userMap));
+}
+
+function formatCaseRow(row: any): CaseRow {
+  return formatCaseRowWithUserMap(row);
+}
+
 export const caseModel = {
   async getAll(): Promise<CaseRow[]> {
     const cases = await query('SELECT * FROM cases ORDER BY created_at DESC, id DESC');
     const caseIds = cases.map((c: any) => c.id);
-    const formatted = cases.map(formatCaseRow);
+    const formatted = await formatCaseRows(cases);
 
     if (caseIds.length > 0) {
       const alertMap = await alertModel.getAlertsByCaseIds(caseIds);
@@ -146,12 +257,16 @@ export const caseModel = {
 
   async findById(id: number): Promise<CaseRow | null> {
     const row = await queryOne('SELECT * FROM cases WHERE id = ?', [id]);
-    return row ? formatCaseRow(row) : null;
+    if (!row) return null;
+    const formatted = await formatCaseRows([row]);
+    return formatted[0] || null;
   },
 
   async findByCaseId(caseId: string): Promise<CaseRow | null> {
     const row = await queryOne('SELECT * FROM cases WHERE case_number = ? OR discord_message_id = ?', [caseId, caseId]);
-    return row ? formatCaseRow(row) : null;
+    if (!row) return null;
+    const formatted = await formatCaseRows([row]);
+    return formatted[0] || null;
   },
 
   async getByOfficerDiscordId(discordId: string): Promise<CaseRow[]> {
@@ -175,10 +290,10 @@ export const caseModel = {
       [targetSnowflake, paramPattern, paramPattern, paramPattern]
     );
 
-    const formatted = cases.map(formatCaseRow);
+    const formatted = await formatCaseRows(cases);
 
     const filtered = formatted.filter((c: CaseRow) => {
-      const officerSf = extractSnowflake(c.officer_discord_id || c.officerDiscordId || c.officerId || c.officer_in_charge);
+      const officerSf = extractSnowflake(c.officer_discord_id || c.officerDiscordId || c.officerId);
       if (officerSf && officerSf === targetSnowflake) return true;
 
       let helperText = '';
@@ -208,7 +323,6 @@ export const caseModel = {
         };
       });
     }
-
     return filtered;
   },
 

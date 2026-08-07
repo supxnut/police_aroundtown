@@ -55,7 +55,8 @@ export const CasesCard: React.FC<CasesCardProps> = ({ cases, totalCount }) => {
           </div>
         ) : (
           cases.map((c) => {
-            const officerName = c.officerName || c.officer_in_charge || 'ไม่ระบุ';
+            const rawOfficerName = c.officerName || c.officer_in_charge || c.officerDiscordId || c.officer_discord_id || 'ไม่ระบุ';
+            const officerName = rawOfficerName.replace(/<@!?(\d+)>/g, '$1');
             const officerAvatar = c.officerAvatar || c.officer_avatar;
             const dateStr = formatDate(c.created_at || c.createdAt || c.date || '');
             const typeStr = c.type || c.case_type || 'คดีปกติ';
@@ -77,6 +78,7 @@ export const CasesCard: React.FC<CasesCardProps> = ({ cases, totalCount }) => {
 
             const hasHelpers = helpersList.length > 0;
             const hasImage = Boolean(c.image && c.image.trim().length > 0);
+            const cleanDescription = (c.description || '').replace(/<@!?(\d+)>/g, '$1');
 
             return (
               <div
@@ -125,7 +127,8 @@ export const CasesCard: React.FC<CasesCardProps> = ({ cases, totalCount }) => {
                           <span className="text-[10px] text-slate-400 block font-semibold">ผู้ช่วย:</span>
                           <div className="flex flex-wrap gap-1">
                             {helpersList.map((h: any, idx: number) => {
-                              const hName = typeof h === 'string' ? h : h.name || h.fullname || h.id || `Helper ${idx + 1}`;
+                              const rawHName = typeof h === 'string' ? h : h.name || h.fullname || h.id || `Helper ${idx + 1}`;
+                              const hName = String(rawHName).replace(/<@!?(\d+)>/g, '$1');
                               const hAvatar = typeof h === 'object' ? h.avatar : undefined;
                               return (
                                 <span
@@ -145,9 +148,9 @@ export const CasesCard: React.FC<CasesCardProps> = ({ cases, totalCount }) => {
                     )}
 
                     {/* Description */}
-                    {c.description && (
+                    {cleanDescription && (
                       <p className="text-xs text-slate-300 leading-relaxed bg-slate-900/40 p-2 rounded border border-slate-800/40 whitespace-pre-wrap">
-                        {c.description}
+                        {cleanDescription}
                       </p>
                     )}
                   </div>

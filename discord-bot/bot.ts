@@ -132,22 +132,53 @@ async function processAndStoreDiscordMessage(msg: Message) {
       }
 
       const caseType = parsed.case_type || 'คดีปกติ';
-      const assistantText = Array.isArray(parsed.assistant) ? parsed.assistant.join(', ') : (parsed.assistant || 'ไม่มี');
+
+      // 1. Extract officer Discord ID using required regex: /👮\s*คนลงคดี[\s\S]*?<@!?(\d+)>/
+      let officerDiscordId = '';
+      const officerMatch = cleanText.match(/👮\s*คนลงคดี[\s\S]*?<@!?(\d+)>/);
+      if (officerMatch && officerMatch[1]) {
+        officerDiscordId = officerMatch[1];
+      } else {
+        const altMatch = cleanText.match(/(?:คนลงคดี|ผู้ลงคดี|เจ้าหน้าที่|officer)[\s\S]*?<@!?(\d+)>/i);
+        if (altMatch && altMatch[1]) {
+          officerDiscordId = altMatch[1];
+        }
+      }
+
+      // 2. Extract helper Discord IDs using required regex: /<@!?(\d+)>/g inside "ผู้ช่วย" section
+      let helperSection = '';
+      const helperMatch = cleanText.match(/(?:🛠\s*)?ผู้ช่วย[\s\S]*/i);
+      if (helperMatch) {
+        helperSection = helperMatch[0].split(/\n[🕒📁📋⏰]/)[0];
+      }
+      const helperDiscordIds: string[] = [];
+      const helperRegex = /<@!?(\d+)>/g;
+      let hm;
+      while ((hm = helperRegex.exec(helperSection)) !== null) {
+        const hId = hm[1];
+        if (hId && hId !== officerDiscordId && !helperDiscordIds.includes(hId)) {
+          helperDiscordIds.push(hId);
+        }
+      }
+
+      const assistantText = helperDiscordIds.join(', ') || (Array.isArray(parsed.assistant) ? parsed.assistant.join(', ') : (parsed.assistant || 'ไม่มี'));
 
       await query(
-        `INSERT INTO cases (case_number, title, case_type, description, suspect_name, officer_in_charge, assistant_officer, officer_discord_id, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(case_number) DO UPDATE SET title = excluded.title, case_type = excluded.case_type, description = excluded.description, officer_in_charge = excluded.officer_in_charge, assistant_officer = excluded.assistant_officer, officer_discord_id = excluded.officer_discord_id, status = excluded.status`,
+        `INSERT INTO cases (case_number, title, case_type, description, suspect_name, officer_in_charge, assistant_officer, officer_discord_id, helpers, status, discord_message_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(case_number) DO UPDATE SET title = excluded.title, case_type = excluded.case_type, description = excluded.description, officer_in_charge = excluded.officer_in_charge, assistant_officer = excluded.assistant_officer, officer_discord_id = excluded.officer_discord_id, helpers = excluded.helpers, status = excluded.status, discord_message_id = excluded.discord_message_id`,
         [
           caseNumber,
           parsed.case_title || caseType,
           caseType,
           parsed.description || cleanText,
           Array.isArray(parsed.suspects) && parsed.suspects.length > 0 ? parsed.suspects.join(', ') : 'Unknown',
-          parsed.officer || msg.author.username,
+          parsed.officer || officerDiscordId || 'ไม่ระบุ',
           assistantText,
-          msg.author.id,
-          parsed.status === 'ปิดคดี' ? 'closed' : 'open'
+          officerDiscordId,
+          JSON.stringify(helperDiscordIds),
+          parsed.status === 'ปิดคดี' ? 'closed' : 'open',
+          msg.id
         ]
       );
       try { await DutyValidationService.validateCaseByNumber(caseNumber); } catch (_) {}
