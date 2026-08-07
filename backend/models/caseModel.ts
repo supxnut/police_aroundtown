@@ -20,6 +20,7 @@ export interface CaseRow {
   officer_in_charge: string;
   officerName?: string;
   officer_discord_id?: string;
+  officerDiscordId?: string;
   officerId?: string;
   officer_avatar?: string;
   officerAvatar?: string;
@@ -28,6 +29,9 @@ export interface CaseRow {
   image?: string;
   discord_message_id?: string;
   discordMessageId?: string;
+  messageId?: string;
+  guild_id?: string;
+  guildId?: string;
   status: 'open' | 'closed' | 'pending';
   created_at?: string;
   createdAt?: string;
@@ -71,12 +75,13 @@ function formatCaseRow(row: any): CaseRow {
   }
 
   const caseIdVal = row.case_number || row.caseId || `CASE-${row.id}`;
-  const caseTypeVal = row.case_type || row.type || 'คดีปกติ';
+  const caseTypeVal = row.case_type || row.type || row.caseType || 'คดีปกติ';
   const officerNameVal = row.officer_in_charge || row.officerName || 'ไม่ระบุ';
-  const officerIdVal = row.officer_discord_id || row.officerId || '';
+  const officerIdVal = row.officer_discord_id || row.officerDiscordId || row.officerId || '';
   const officerAvatarVal = row.officer_avatar || row.officerAvatar || '';
   const imageVal = row.image || '';
-  const discordMsgIdVal = row.discord_message_id || row.discordMessageId || '';
+  const discordMsgIdVal = row.discord_message_id || row.discordMessageId || row.messageId || '';
+  const guildIdVal = row.guild_id || row.guildId || '';
   const createdAtVal = row.created_at || row.createdAt || new Date().toISOString();
 
   return {
@@ -92,6 +97,7 @@ function formatCaseRow(row: any): CaseRow {
     officer_in_charge: officerNameVal,
     officerName: officerNameVal,
     officer_discord_id: officerIdVal,
+    officerDiscordId: officerIdVal,
     officerId: officerIdVal,
     officer_avatar: officerAvatarVal,
     officerAvatar: officerAvatarVal,
@@ -100,6 +106,9 @@ function formatCaseRow(row: any): CaseRow {
     image: imageVal,
     discord_message_id: discordMsgIdVal,
     discordMessageId: discordMsgIdVal,
+    messageId: discordMsgIdVal,
+    guild_id: guildIdVal,
+    guildId: guildIdVal,
     status: row.status || 'closed',
     created_at: createdAtVal,
     createdAt: createdAtVal,
@@ -150,7 +159,9 @@ export const caseModel = {
     case_number?: string;
     type?: string;
     case_type?: string;
+    caseType?: string;
     officerId?: string;
+    officerDiscordId?: string;
     officer_discord_id?: string;
     officerName?: string;
     officer_in_charge?: string;
@@ -161,17 +172,21 @@ export const caseModel = {
     image?: string;
     discordMessageId?: string;
     discord_message_id?: string;
+    messageId?: string;
+    guildId?: string;
+    guild_id?: string;
     createdAt?: string;
     created_at?: string;
   }): Promise<{ id: number; caseData: CaseRow }> {
     const caseIdVal = data.caseId || data.case_number || `CASE-${Date.now()}`;
-    const caseTypeVal = data.type || data.case_type || 'คดีปกติ';
-    const officerIdVal = data.officerId || data.officer_discord_id || '';
+    const caseTypeVal = data.type || data.case_type || data.caseType || 'คดีปกติ';
+    const officerIdVal = data.officerDiscordId || data.officerId || data.officer_discord_id || '';
     const officerNameVal = data.officerName || data.officer_in_charge || 'ไม่ระบุ';
     const officerAvatarVal = data.officerAvatar || data.officer_avatar || '';
     const descriptionVal = data.description || '';
     const imageVal = data.image || '';
-    const discordMsgIdVal = data.discordMessageId || data.discord_message_id || '';
+    const discordMsgIdVal = data.messageId || data.discordMessageId || data.discord_message_id || '';
+    const guildIdVal = data.guildId || data.guild_id || '';
     const createdAtVal = data.createdAt || data.created_at || new Date().toISOString();
 
     // Process helpers array
@@ -214,6 +229,8 @@ export const caseModel = {
           assistant_officer = ?, 
           description = ?, 
           image = ?, 
+          guild_id = ?,
+          discord_message_id = ?,
           created_at = ?,
           updated_at = CURRENT_TIMESTAMP
         WHERE id = ?`,
@@ -226,6 +243,8 @@ export const caseModel = {
           assistantOfficerStr,
           descriptionVal,
           imageVal,
+          guildIdVal,
+          discordMsgIdVal,
           createdAtVal,
           insertId
         ]
@@ -235,8 +254,8 @@ export const caseModel = {
         `INSERT INTO cases (
           case_number, title, case_type, description, suspect_name, 
           officer_in_charge, officer_discord_id, officer_avatar, assistant_officer, 
-          helpers, image, discord_message_id, status, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+          helpers, image, guild_id, discord_message_id, status, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
         [
           caseIdVal,
           titleVal,
@@ -249,6 +268,7 @@ export const caseModel = {
           assistantOfficerStr,
           helpersJson,
           imageVal,
+          guildIdVal,
           discordMsgIdVal,
           'closed',
           createdAtVal

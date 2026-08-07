@@ -24,8 +24,10 @@ import axios from 'axios';
 
 export interface CaseBotPayload {
   caseId: string;
-  type: 'คดีปกติ' | 'Take2' | 'ส้มแดง' | 'จัดร้าน' | string;
-  officerId: string;
+  type?: 'คดีปกติ' | 'Take2' | 'ส้มแดง' | 'จัดร้าน' | string;
+  caseType?: 'คดีปกติ' | 'Take2' | 'ส้มแดง' | 'จัดร้าน' | string;
+  officerId?: string;
+  officerDiscordId?: string;
   officerName: string;
   officerAvatar?: string;
   helpers?: Array<{
@@ -36,6 +38,8 @@ export interface CaseBotPayload {
   }>;
   description: string;
   image?: string;
+  guildId?: string;
+  messageId?: string;
   discordMessageId?: string;
   createdAt?: string;
 }
@@ -45,7 +49,7 @@ export async function sendCaseToWebsite(payload: CaseBotPayload) {
   const apiKey = process.env.API_KEY || process.env.BOT_API_KEY || 'my-secure-discord-bot-key-2026';
 
   try {
-    const response = await axios.post(`${websiteUrl}/api/cases`, payload, {
+    const response = await axios.post(`${websiteUrl}/api/cases/sync`, payload, {
       headers: {
         'Content-Type': 'application/json',
         'x-api-key': apiKey,

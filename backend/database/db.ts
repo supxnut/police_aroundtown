@@ -158,6 +158,7 @@ export const initDB = async (): Promise<void> => {
   try { db.run("ALTER TABLE cases ADD COLUMN helpers TEXT DEFAULT '[]'"); } catch (_) {}
   try { db.run("ALTER TABLE cases ADD COLUMN image TEXT DEFAULT ''"); } catch (_) {}
   try { db.run("ALTER TABLE cases ADD COLUMN discord_message_id TEXT DEFAULT ''"); } catch (_) {}
+  try { db.run("ALTER TABLE cases ADD COLUMN guild_id TEXT DEFAULT ''"); } catch (_) {}
   try { db.run("ALTER TABLE cases ADD COLUMN updated_at DATETIME DEFAULT CURRENT_TIMESTAMP"); } catch (_) {}
 
   // Create activities table

@@ -6,5 +6,6 @@ const router = Router();
 
 router.use(verifyApiKeyOrAuth);
 router.get('/', dashboardController.getDashboardData);
+router.get('/:discordId', dashboardController.getOfficerDashboard);
 
 export default router;
