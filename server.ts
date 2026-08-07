@@ -7,8 +7,11 @@ import { startDiscordLogSync } from './discordLogSync.server';
 async function startServer() {
   try {
     // Initialize Database Engine and Seed Data
-    await initDB();
-    console.log('Database initialized successfully.');
+    try {
+      await initDB();
+    } catch (err) {
+      console.error("Database initialization failed:", err);
+    }
 
     // Initialize Background Discord Log Sync Service
     startDiscordLogSync().catch((err) => {

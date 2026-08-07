@@ -87,20 +87,74 @@ export const queryOne = async (sql: string, params: any[] = []): Promise<any> =>
 export const initDB = async (): Promise<void> => {
   const SQL = await initSqlJs();
 
+  let isCorrupted = false;
+  let loadedDb: Database | null = null;
+
   if (fs.existsSync(dbPath)) {
+    console.log('[Database] Existing database found.');
     try {
       const fileBuffer = fs.readFileSync(dbPath);
-      db = new SQL.Database(fileBuffer);
-    } catch (e) {
-      console.error("Failed to load existing SQLite DB file, creating new instance:", e);
-      db = new SQL.Database();
+      loadedDb = new SQL.Database(fileBuffer);
+      loadedDb.exec("PRAGMA integrity_check;");
+      loadedDb.exec("SELECT count(*) FROM sqlite_master;");
+    } catch (err) {
+      isCorrupted = true;
     }
-  } else {
-    db = new SQL.Database();
   }
 
+  if (fs.existsSync(dbPath) && isCorrupted) {
+    console.log('[Database] Database corrupted.');
+    console.log('[Database] Backing up corrupted database...');
+    const timestamp = Date.now();
+    const corruptedPath = path.join(process.cwd(), `database-corrupted-${timestamp}.db`);
+    try {
+      if (loadedDb) {
+        try { loadedDb.close(); } catch (_) {}
+        loadedDb = null;
+      }
+      fs.renameSync(dbPath, corruptedPath);
+    } catch (_) {
+      try {
+        fs.copyFileSync(dbPath, corruptedPath);
+        fs.unlinkSync(dbPath);
+      } catch (_) {}
+    }
+    console.log('[Database] Creating new database...');
+    db = new SQL.Database();
+  } else if (!fs.existsSync(dbPath)) {
+    console.log('[Database] Creating new database...');
+    db = new SQL.Database();
+  } else {
+    db = loadedDb;
+  }
+
+  try {
+    setupSchema(db!);
+  } catch (err: any) {
+    console.log('[Database] Database corrupted.');
+    console.log('[Database] Backing up corrupted database...');
+    const timestamp = Date.now();
+    const corruptedPath = path.join(process.cwd(), `database-corrupted-${timestamp}.db`);
+    try {
+      if (db) {
+        try { db.close(); } catch (_) {}
+      }
+      if (fs.existsSync(dbPath)) {
+        fs.renameSync(dbPath, corruptedPath);
+      }
+    } catch (_) {}
+    console.log('[Database] Creating new database...');
+    db = new SQL.Database();
+    setupSchema(db);
+  }
+
+  saveDb();
+  console.log('[Database] Database initialized successfully.');
+};
+
+function setupSchema(targetDb: Database) {
   // Create users table
-  db.run(`
+  targetDb.run(`
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       discord_id TEXT NOT NULL UNIQUE,
@@ -115,11 +169,11 @@ export const initDB = async (): Promise<void> => {
     )
   `);
 
-  try { db.run("ALTER TABLE users ADD COLUMN total_hours REAL DEFAULT 0.0"); } catch (_) {}
-  try { db.run("ALTER TABLE users ADD COLUMN total_cases INTEGER DEFAULT 0"); } catch (_) {}
+  try { targetDb.run("ALTER TABLE users ADD COLUMN total_hours REAL DEFAULT 0.0"); } catch (_) {}
+  try { targetDb.run("ALTER TABLE users ADD COLUMN total_cases INTEGER DEFAULT 0"); } catch (_) {}
 
   // Create duty_logs table
-  db.run(`
+  targetDb.run(`
     CREATE TABLE IF NOT EXISTS duty_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       user_id INTEGER NOT NULL,
@@ -133,7 +187,7 @@ export const initDB = async (): Promise<void> => {
   `);
 
   // Create cases table
-  db.run(`
+  targetDb.run(`
     CREATE TABLE IF NOT EXISTS cases (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       case_number TEXT NOT NULL UNIQUE,
@@ -147,23 +201,23 @@ export const initDB = async (): Promise<void> => {
     )
   `);
 
-  try { db.run("ALTER TABLE cases ADD COLUMN reporter_name TEXT DEFAULT 'ไม่ระบุ'"); } catch (_) {}
-  try { db.run("ALTER TABLE cases ADD COLUMN officer_discord_id TEXT DEFAULT ''"); } catch (_) {}
-  try { db.run("ALTER TABLE cases ADD COLUMN officer_rank TEXT DEFAULT ''"); } catch (_) {}
-  try { db.run("ALTER TABLE cases ADD COLUMN received_time TEXT DEFAULT ''"); } catch (_) {}
-  try { db.run("ALTER TABLE cases ADD COLUMN closed_time TEXT DEFAULT ''"); } catch (_) {}
-  try { db.run("ALTER TABLE cases ADD COLUMN duration TEXT DEFAULT ''"); } catch (_) {}
-  try { db.run("ALTER TABLE cases ADD COLUMN assistant_officer TEXT DEFAULT 'ไม่มี'"); } catch (_) {}
-  try { db.run("ALTER TABLE cases ADD COLUMN case_type TEXT DEFAULT 'คดีปกติ'"); } catch (_) {}
-  try { db.run("ALTER TABLE cases ADD COLUMN officer_avatar TEXT DEFAULT ''"); } catch (_) {}
-  try { db.run("ALTER TABLE cases ADD COLUMN helpers TEXT DEFAULT '[]'"); } catch (_) {}
-  try { db.run("ALTER TABLE cases ADD COLUMN image TEXT DEFAULT ''"); } catch (_) {}
-  try { db.run("ALTER TABLE cases ADD COLUMN discord_message_id TEXT DEFAULT ''"); } catch (_) {}
-  try { db.run("ALTER TABLE cases ADD COLUMN guild_id TEXT DEFAULT ''"); } catch (_) {}
-  try { db.run("ALTER TABLE cases ADD COLUMN updated_at DATETIME"); } catch (_) {}
+  try { targetDb.run("ALTER TABLE cases ADD COLUMN reporter_name TEXT DEFAULT 'ไม่ระบุ'"); } catch (_) {}
+  try { targetDb.run("ALTER TABLE cases ADD COLUMN officer_discord_id TEXT DEFAULT ''"); } catch (_) {}
+  try { targetDb.run("ALTER TABLE cases ADD COLUMN officer_rank TEXT DEFAULT ''"); } catch (_) {}
+  try { targetDb.run("ALTER TABLE cases ADD COLUMN received_time TEXT DEFAULT ''"); } catch (_) {}
+  try { targetDb.run("ALTER TABLE cases ADD COLUMN closed_time TEXT DEFAULT ''"); } catch (_) {}
+  try { targetDb.run("ALTER TABLE cases ADD COLUMN duration TEXT DEFAULT ''"); } catch (_) {}
+  try { targetDb.run("ALTER TABLE cases ADD COLUMN assistant_officer TEXT DEFAULT 'ไม่มี'"); } catch (_) {}
+  try { targetDb.run("ALTER TABLE cases ADD COLUMN case_type TEXT DEFAULT 'คดีปกติ'"); } catch (_) {}
+  try { targetDb.run("ALTER TABLE cases ADD COLUMN officer_avatar TEXT DEFAULT ''"); } catch (_) {}
+  try { targetDb.run("ALTER TABLE cases ADD COLUMN helpers TEXT DEFAULT '[]'"); } catch (_) {}
+  try { targetDb.run("ALTER TABLE cases ADD COLUMN image TEXT DEFAULT ''"); } catch (_) {}
+  try { targetDb.run("ALTER TABLE cases ADD COLUMN discord_message_id TEXT DEFAULT ''"); } catch (_) {}
+  try { targetDb.run("ALTER TABLE cases ADD COLUMN guild_id TEXT DEFAULT ''"); } catch (_) {}
+  try { targetDb.run("ALTER TABLE cases ADD COLUMN updated_at DATETIME"); } catch (_) {}
 
   // Create activities table
-  db.run(`
+  targetDb.run(`
     CREATE TABLE IF NOT EXISTS activities (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
@@ -179,11 +233,11 @@ export const initDB = async (): Promise<void> => {
     )
   `);
 
-  try { db.run("ALTER TABLE activities ADD COLUMN question TEXT DEFAULT 'โปรดโหวตหรือตอบคำถามสำหรับกิจกรรมนี้'"); } catch (_) {}
-  try { db.run("ALTER TABLE activities ADD COLUMN options TEXT DEFAULT '[\"เห็นด้วย / เข้าร่วม\", \"ไม่เห็นด้วย / ไม่สะดวก\", \"ข้อเสนอแนะเพิ่มเติม\"]'"); } catch (_) {}
+  try { targetDb.run("ALTER TABLE activities ADD COLUMN question TEXT DEFAULT 'โปรดโหวตหรือตอบคำถามสำหรับกิจกรรมนี้'"); } catch (_) {}
+  try { targetDb.run("ALTER TABLE activities ADD COLUMN options TEXT DEFAULT '[\"เห็นด้วย / เข้าร่วม\", \"ไม่เห็นด้วย / ไม่สะดวก\", \"ข้อเสนอแนะเพิ่มเติม\"]'"); } catch (_) {}
 
   // Create activity_join table
-  db.run(`
+  targetDb.run(`
     CREATE TABLE IF NOT EXISTS activity_join (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       activity_id INTEGER NOT NULL,
@@ -196,10 +250,10 @@ export const initDB = async (): Promise<void> => {
     )
   `);
 
-  try { db.run("ALTER TABLE activity_join ADD COLUMN answer TEXT DEFAULT ''"); } catch (_) {}
+  try { targetDb.run("ALTER TABLE activity_join ADD COLUMN answer TEXT DEFAULT ''"); } catch (_) {}
 
   // Create activity_history table
-  db.run(`
+  targetDb.run(`
     CREATE TABLE IF NOT EXISTS activity_history (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       activity_id INTEGER NOT NULL,
@@ -215,7 +269,7 @@ export const initDB = async (): Promise<void> => {
   `);
 
   // Create shop_items table
-  db.run(`
+  targetDb.run(`
     CREATE TABLE IF NOT EXISTS shop_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -228,7 +282,7 @@ export const initDB = async (): Promise<void> => {
   `);
 
   // Create logs table
-  db.run(`
+  targetDb.run(`
     CREATE TABLE IF NOT EXISTS logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       admin_discord_id TEXT NOT NULL,
@@ -241,7 +295,7 @@ export const initDB = async (): Promise<void> => {
   `);
 
   // Create discord_logs table for Discord Sync Bot
-  db.run(`
+  targetDb.run(`
     CREATE TABLE IF NOT EXISTS discord_logs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       message_id TEXT NOT NULL UNIQUE,
@@ -255,7 +309,7 @@ export const initDB = async (): Promise<void> => {
   `);
 
   // Create announcements table
-  db.run(`
+  targetDb.run(`
     CREATE TABLE IF NOT EXISTS announcements (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
@@ -266,7 +320,7 @@ export const initDB = async (): Promise<void> => {
   `);
 
   // Create case_alerts table for Duty & Case Verification
-  db.run(`
+  targetDb.run(`
     CREATE TABLE IF NOT EXISTS case_alerts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       officer_id INTEGER,
@@ -288,7 +342,7 @@ export const initDB = async (): Promise<void> => {
   `);
 
   // Create evidence table
-  db.run(`
+  targetDb.run(`
     CREATE TABLE IF NOT EXISTS evidence (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       case_number TEXT,
@@ -302,7 +356,7 @@ export const initDB = async (): Promise<void> => {
   `);
 
   // Create wanted table
-  db.run(`
+  targetDb.run(`
     CREATE TABLE IF NOT EXISTS wanted (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       suspect_name TEXT NOT NULL,
@@ -315,11 +369,9 @@ export const initDB = async (): Promise<void> => {
     )
   `);
 
-  try { db.run("CREATE INDEX IF NOT EXISTS idx_case_alerts_status ON case_alerts(status)"); } catch (_) {}
-  try { db.run("CREATE INDEX IF NOT EXISTS idx_case_alerts_case_id ON case_alerts(case_id)"); } catch (_) {}
-  try { db.run("CREATE INDEX IF NOT EXISTS idx_case_alerts_officer_id ON case_alerts(officer_id)"); } catch (_) {}
-
-  saveDb();
-};
+  try { targetDb.run("CREATE INDEX IF NOT EXISTS idx_case_alerts_status ON case_alerts(status)"); } catch (_) {}
+  try { targetDb.run("CREATE INDEX IF NOT EXISTS idx_case_alerts_case_id ON case_alerts(case_id)"); } catch (_) {}
+  try { targetDb.run("CREATE INDEX IF NOT EXISTS idx_case_alerts_officer_id ON case_alerts(officer_id)"); } catch (_) {}
+}
 
 export default db;
