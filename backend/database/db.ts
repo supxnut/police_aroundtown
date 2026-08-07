@@ -279,6 +279,34 @@ export const initDB = async (): Promise<void> => {
     )
   `);
 
+  // Create evidence table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS evidence (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      case_number TEXT,
+      title TEXT NOT NULL,
+      description TEXT,
+      items TEXT,
+      image TEXT,
+      officer_name TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  // Create wanted table
+  db.run(`
+    CREATE TABLE IF NOT EXISTS wanted (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      suspect_name TEXT NOT NULL,
+      charges TEXT NOT NULL,
+      reward REAL DEFAULT 0,
+      status TEXT DEFAULT 'active',
+      officer_in_charge TEXT,
+      image TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
   try { db.run("CREATE INDEX IF NOT EXISTS idx_case_alerts_status ON case_alerts(status)"); } catch (_) {}
   try { db.run("CREATE INDEX IF NOT EXISTS idx_case_alerts_case_id ON case_alerts(case_id)"); } catch (_) {}
   try { db.run("CREATE INDEX IF NOT EXISTS idx_case_alerts_officer_id ON case_alerts(officer_id)"); } catch (_) {}

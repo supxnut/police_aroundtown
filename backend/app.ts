@@ -13,6 +13,12 @@ import shopRoutes from './routes/shopRoutes';
 import logRoutes from './routes/logRoutes';
 import notificationRoutes from './routes/notificationRoutes';
 import caseAlertRoutes from './routes/caseAlertRoutes';
+import discordParserRoutes from './routes/discordParserRoutes';
+import discordLogRoutes from './routes/discordLogRoutes';
+import evidenceRoutes from './routes/evidenceRoutes';
+import wantedRoutes from './routes/wantedRoutes';
+import dashboardRoutes from './routes/dashboardRoutes';
+import realtimeRoutes from './routes/realtimeRoutes';
 
 export const createApp = () => {
   const app = express();
@@ -45,6 +51,12 @@ export const createApp = () => {
   app.use('/api/logs', logRoutes);
   app.use('/api/notifications', notificationRoutes);
   app.use('/api/admin/case-alerts', caseAlertRoutes);
+  app.use('/api/discord-parser', discordParserRoutes);
+  app.use('/api/discord', discordLogRoutes);
+  app.use('/api/evidence', evidenceRoutes);
+  app.use('/api/wanted', wantedRoutes);
+  app.use('/api/dashboard', dashboardRoutes);
+  app.use('/api/realtime', realtimeRoutes);
 
   return app;
 };

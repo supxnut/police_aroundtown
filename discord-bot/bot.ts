@@ -1,10 +1,12 @@
-import { Client, GatewayIntentBits, Partials, Message, Embed, Attachment } from 'discord.js';
+import { Client, GatewayIntentBits, Partials, Message, Channel } from 'discord.js';
 import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 import https from 'https';
 import { query, queryOne } from '../backend/database/db.js';
 import { DutyValidationService } from '../backend/services/dutyValidationService.js';
+import { parseDiscordLog } from '../backend/controllers/discordParserController.js';
+import { realtimeService } from '../backend/services/realtimeService.js';
 
 dotenv.config({ path: path.join(process.cwd(), '.env') });
 
@@ -25,7 +27,7 @@ const client = new Client({
   partials: [Partials.Message, Partials.Channel, Partials.Reaction],
 });
 
-// Helper: Download attachment images to uploads/cases/
+// Helper: Download attachment images
 async function downloadAttachment(url: string, filename: string): Promise<string> {
   const uploadDir = path.join(process.cwd(), 'uploads', 'cases');
   if (!fs.existsSync(uploadDir)) {
@@ -50,154 +52,165 @@ async function downloadAttachment(url: string, filename: string): Promise<string
   });
 }
 
-// Helper: Extract Discord ID from mention or regex
-function extractDiscordId(text: string, authorId: string): string {
-  const mentionMatch = text.match(/<@!?(\d{17,20})>/);
-  if (mentionMatch) return mentionMatch[1];
+// Convert Discord Message (including Embeds, Fields, Attachments) to clean text for Gemini
+function formatMessageToCleanText(msg: Message): string {
+  let lines: string[] = [];
 
-  const idMatch = text.match(/\b\d{17,20}\b/);
-  if (idMatch) return idMatch[0];
-
-  return authorId;
-}
-
-// Helper: Parse Duty message
-async function parseAndStoreDutyLog(msg: Message) {
-  const text = msg.content + ' ' + (msg.embeds.map(e => `${e.title || ''} ${e.description || ''} ${e.fields.map(f => `${f.name}: ${f.value}`).join(' ')}`).join(' '));
-  const discordId = extractDiscordId(text, msg.author.id);
-  const user = await queryOne('SELECT * FROM users WHERE discord_id = ?', [discordId]);
-
-  if (!user) return;
-
-  const isEndDuty = /clock\s*out|off\s*duty|ออกเวร|จบเวร|สิ้นสุด/i.test(text);
-  const isStartDuty = /clock\s*in|on\s*duty|เข้าเวร|เริ่มเวร/i.test(text);
-
-  const todayStr = new Date(msg.createdTimestamp).toISOString().split('T')[0];
-  const timeStr = new Date(msg.createdTimestamp).toTimeString().split(' ')[0].substring(0, 5);
-
-  if (isEndDuty) {
-    const openLog = await queryOne(
-      'SELECT * FROM duty_logs WHERE user_id = ? AND (end_time = "" OR end_time IS NULL) ORDER BY id DESC LIMIT 1',
-      [user.id]
-    );
-
-    if (openLog) {
-      const parts = (openLog.start_time || '00:00').split(':').map(Number);
-      const startH = isNaN(parts[0]) ? 0 : parts[0];
-      const startM = isNaN(parts[1]) ? 0 : parts[1];
-      const [endH, endM] = timeStr.split(':').map(Number);
-      let diffHours = (endH + endM / 60) - (startH + startM / 60);
-      if (diffHours < 0) diffHours += 24;
-
-      await query(
-        'UPDATE duty_logs SET end_time = ?, hours = ? WHERE id = ?',
-        [timeStr, parseFloat(diffHours.toFixed(2)), openLog.id]
-      );
-    }
-  } else if (isStartDuty) {
-    // Check if user already has an open log to prevent duplicate open logs
-    const openLog = await queryOne(
-      'SELECT * FROM duty_logs WHERE user_id = ? AND (end_time = "" OR end_time IS NULL) ORDER BY id DESC LIMIT 1',
-      [user.id]
-    );
-    if (!openLog) {
-      await query(
-        'INSERT INTO duty_logs (user_id, date, start_time, end_time, hours) VALUES (?, ?, ?, ?, ?)',
-        [user.id, todayStr, timeStr, '', 0]
-      );
-    }
+  if (msg.content) {
+    lines.push(`[Content]: ${msg.content}`);
   }
 
-  // Revalidate officer cases after duty status update
-  try {
-    await DutyValidationService.revalidateOfficerCasesByUserId(user.id);
-  } catch (err) {
-    console.error('Duty validation recheck error:', err);
-  }
-}
-
-// Helper: Parse Case message
-async function parseAndStoreCaseLog(msg: Message) {
-  let content = msg.content;
-  let title = 'Police Case Record';
-  let description = content;
-  let suspectName = 'Unknown Suspect';
-  let officerInCharge = msg.author.username;
-  let caseNumber = `CASE-${Date.now().toString().slice(-6)}`;
-
-  if (msg.embeds.length > 0) {
-    const embed = msg.embeds[0];
-    title = embed.title || title;
-    description = embed.description || description;
-
-    for (const field of embed.fields) {
-      if (/suspect|ผู้ต้องหา|ผู้ต้องสงสัย/i.test(field.name)) suspectName = field.value;
-      if (/officer|เจ้าหน้าที่|ผู้รับผิดชอบ/i.test(field.name)) officerInCharge = field.value;
-      if (/case|คดี|หมายเลข/i.test(field.name)) caseNumber = field.value;
-    }
-  }
-
-  const officerDiscordId = extractDiscordId(content + ' ' + (msg.embeds.map(e => `${e.title || ''} ${e.description || ''}`).join(' ')), msg.author.id);
-
-  // Handle image attachments
-  let imageUrl = '';
-  if (msg.attachments.size > 0) {
-    const attachment = msg.attachments.first();
-    if (attachment && attachment.contentType?.startsWith('image/')) {
-      try {
-        imageUrl = await downloadAttachment(attachment.url, attachment.name);
-      } catch (err) {
-        console.error('Failed to download case attachment:', err);
+  if (msg.embeds && msg.embeds.length > 0) {
+    for (const embed of msg.embeds) {
+      if (embed.title) lines.push(`[Embed Title]: ${embed.title}`);
+      if (embed.description) lines.push(`[Embed Description]: ${embed.description}`);
+      if (embed.fields && embed.fields.length > 0) {
+        for (const f of embed.fields) {
+          lines.push(`${f.name}: ${f.value}`);
+        }
       }
+      if (embed.footer?.text) lines.push(`[Footer]: ${embed.footer.text}`);
     }
   }
 
-  // Save case into DB
-  try {
-    await query(
-      `INSERT INTO cases (case_number, title, description, suspect_name, officer_in_charge, officer_discord_id, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(case_number) DO UPDATE SET title = excluded.title, description = excluded.description, officer_in_charge = excluded.officer_in_charge, officer_discord_id = excluded.officer_discord_id, status = excluded.status`,
-      [caseNumber, title, `${description} ${imageUrl ? `\n[Attachment](${imageUrl})` : ''}`, suspectName, officerInCharge, officerDiscordId, 'open']
-    );
-
-    // Call Duty Validation Layer immediately after storing case log
-    await DutyValidationService.validateCaseByNumber(caseNumber);
-  } catch (e) {
-    console.error('Case insert error:', e);
+  if (msg.attachments && msg.attachments.size > 0) {
+    msg.attachments.forEach(a => {
+      lines.push(`[Attachment]: ${a.url}`);
+    });
   }
+
+  lines.push(`[Author]: ${msg.author.username} (${msg.author.id})`);
+  lines.push(`[Channel]: ${('name' in msg.channel ? (msg.channel as any).name : msg.channelId)}`);
+  lines.push(`[Timestamp]: ${new Date(msg.createdTimestamp).toISOString()}`);
+
+  return lines.join('\n');
 }
 
-// Store raw discord message event
-async function storeDiscordLog(msg: Message, type: string) {
+// Store raw discord message and invoke Gemini processing
+async function processAndStoreDiscordMessage(msg: Message) {
   try {
-    const rawJson = JSON.stringify({
-      id: msg.id,
-      channelId: msg.channelId,
-      author: {
-        id: msg.author.id,
-        username: msg.author.username,
-      },
-      content: msg.content,
-      embeds: msg.embeds,
-      attachments: msg.attachments.map(a => ({ url: a.url, name: a.name })),
-      createdTimestamp: msg.createdTimestamp,
-    });
+    // Check duplicate
+    const existing = await queryOne('SELECT id FROM discord_logs WHERE message_id = ?', [msg.id]);
+    if (existing) return;
 
+    const channelName = 'name' in msg.channel ? (msg.channel as any).name : '';
+    const cleanText = formatMessageToCleanText(msg);
+
+    // Call Gemini Parser with retry
+    let parsed: any = null;
+    try {
+      parsed = await parseDiscordLog(cleanText);
+      if (!parsed || !parsed.success) {
+        // Retry once
+        parsed = await parseDiscordLog(cleanText);
+      }
+    } catch (err) {
+      console.error('Gemini parser error:', err);
+    }
+
+    const logType = parsed?.record_type || 'general';
+
+    // Store in discord_logs
     await query(
       `INSERT INTO discord_logs (message_id, channel_id, discord_id, type, raw_json, created_at)
        VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
        ON CONFLICT(message_id) DO NOTHING`,
-      [msg.id, msg.channelId, msg.author.id, type, rawJson]
+      [msg.id, msg.channelId, msg.author.id, logType, JSON.stringify(parsed || { raw: cleanText })]
     );
+
+    if (!parsed || !parsed.success) return;
+
+    // Route to appropriate DB table based on parsed record_type
+    if (parsed.record_type === 'case') {
+      const caseNumber = parsed.case_number || `CASE-${Date.now().toString().slice(-6)}`;
+      let imageUrl = parsed.image || '';
+      if (!imageUrl && msg.attachments.size > 0) {
+        const att = msg.attachments.first();
+        if (att && att.contentType?.startsWith('image/')) {
+          try { imageUrl = await downloadAttachment(att.url, att.name); } catch (_) {}
+        }
+      }
+
+      await query(
+        `INSERT INTO cases (case_number, title, description, suspect_name, officer_in_charge, officer_discord_id, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(case_number) DO UPDATE SET title = excluded.title, description = excluded.description, officer_in_charge = excluded.officer_in_charge, officer_discord_id = excluded.officer_discord_id, status = excluded.status`,
+        [
+          caseNumber,
+          parsed.case_title || parsed.case_type || 'Police Case',
+          parsed.description || cleanText,
+          Array.isArray(parsed.suspects) && parsed.suspects.length > 0 ? parsed.suspects.join(', ') : 'Unknown',
+          parsed.officer || msg.author.username,
+          msg.author.id,
+          parsed.status === 'ปิดคดี' ? 'closed' : 'open'
+        ]
+      );
+      try { await DutyValidationService.validateCaseByNumber(caseNumber); } catch (_) {}
+      realtimeService.broadcast('CASE_CREATED', { case_number: caseNumber });
+    } else if (parsed.record_type === 'duty') {
+      const user = await queryOne('SELECT * FROM users WHERE discord_id = ? OR fullname LIKE ?', [msg.author.id, `%${parsed.officer || ''}%`]);
+      if (user) {
+        const todayStr = new Date(msg.createdTimestamp).toISOString().split('T')[0];
+        const timeStr = new Date(msg.createdTimestamp).toTimeString().split(' ')[0].substring(0, 5);
+        const isEnd = /out|off|ออกเวร|จบ/i.test(cleanText);
+
+        if (isEnd) {
+          const openLog = await queryOne('SELECT * FROM duty_logs WHERE user_id = ? AND (end_time = "" OR end_time IS NULL) ORDER BY id DESC LIMIT 1', [user.id]);
+          if (openLog) {
+            const parts = (openLog.start_time || '00:00').split(':').map(Number);
+            const [endH, endM] = timeStr.split(':').map(Number);
+            let diff = (endH + endM / 60) - (parts[0] + parts[1] / 60);
+            if (diff < 0) diff += 24;
+            await query('UPDATE duty_logs SET end_time = ?, hours = ? WHERE id = ?', [timeStr, parseFloat(diff.toFixed(2)), openLog.id]);
+          }
+        } else {
+          await query('INSERT INTO duty_logs (user_id, date, start_time, end_time, hours) VALUES (?, ?, ?, ?, ?)', [user.id, todayStr, timeStr, '', 0]);
+        }
+        try { await DutyValidationService.revalidateOfficerCasesByUserId(user.id); } catch (_) {}
+        realtimeService.broadcast('DUTY_LOGGED', { user_id: user.id });
+      }
+    } else if (parsed.record_type === 'evidence') {
+      await query(
+        'INSERT INTO evidence (case_number, title, description, items, image, officer_name) VALUES (?, ?, ?, ?, ?, ?)',
+        [
+          parsed.case_number || '',
+          parsed.case_title || 'Captured Evidence',
+          parsed.description || cleanText,
+          Array.isArray(parsed.evidence) ? parsed.evidence.join(', ') : '',
+          parsed.image || '',
+          parsed.officer || msg.author.username
+        ]
+      );
+      realtimeService.broadcast('EVIDENCE_UPDATED', { type: 'create' });
+    } else if (parsed.record_type === 'wanted') {
+      await query(
+        'INSERT INTO wanted (suspect_name, charges, reward, status, officer_in_charge, image) VALUES (?, ?, ?, ?, ?, ?)',
+        [
+          Array.isArray(parsed.suspects) && parsed.suspects.length > 0 ? parsed.suspects.join(', ') : 'Unknown Suspect',
+          parsed.description || parsed.case_title || 'Wanted Notice',
+          parsed.fine || 0,
+          'active',
+          parsed.officer || msg.author.username,
+          parsed.image || ''
+        ]
+      );
+      realtimeService.broadcast('WANTED_UPDATED', { type: 'create' });
+    } else if (parsed.record_type === 'announcement') {
+      await query('INSERT INTO announcements (title, message, type) VALUES (?, ?, ?)', [
+        parsed.case_title || 'Discord Announcement',
+        parsed.description || cleanText,
+        'announcement'
+      ]);
+      realtimeService.broadcast('ANNOUNCEMENT_CREATED', {});
+    }
   } catch (err) {
-    console.error('Error logging discord raw message:', err);
+    console.error('Error processing discord message:', err);
   }
 }
 
-// Sync missing messages on startup
+// Sync missing messages across all monitored channels
 async function syncMissingMessages() {
-  console.log('🔄 Police Sync Bot: Starting channels synchronization...');
+  console.log('🔄 Police Sync Bot: Synchronizing monitored channels...');
   const channelIds = [DUTY_CHANNEL_ID, CASE_CHANNEL_ID, ANNOUNCEMENT_CHANNEL_ID, SYSTEM_CHANNEL_ID].filter(Boolean);
 
   for (const channelId of channelIds) {
@@ -210,33 +223,15 @@ async function syncMissingMessages() {
         [channelId]
       );
 
-      const options: { limit: number; after?: string } = { limit: 100 };
+      const options: { limit: number; after?: string } = { limit: 50 };
       if (lastLog?.message_id) options.after = lastLog.message_id;
 
       const messages = await channel.messages.fetch(options);
-      console.log(`📥 Channel ${channelId}: Fetched ${messages.size} missing messages.`);
+      const sorted = Array.from(messages.values()).sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
-      const sortedMessages = Array.from(messages.values()).sort((a, b) => a.createdTimestamp - b.createdTimestamp);
-
-      for (const msg of sortedMessages) {
+      for (const msg of sorted) {
         if (msg.author.bot && msg.author.id === client.user?.id) continue;
-
-        let type = 'system';
-        if (channelId === DUTY_CHANNEL_ID) {
-          type = 'duty';
-          await parseAndStoreDutyLog(msg);
-        } else if (channelId === CASE_CHANNEL_ID) {
-          type = 'case';
-          await parseAndStoreCaseLog(msg);
-        } else if (channelId === ANNOUNCEMENT_CHANNEL_ID) {
-          type = 'announcement';
-          await query(
-            'INSERT INTO announcements (title, message, type) VALUES (?, ?, ?)',
-            [msg.embeds[0]?.title || 'Discord Announcement', msg.content || msg.embeds[0]?.description || '', 'announcement']
-          );
-        }
-
-        await storeDiscordLog(msg, type);
+        await processAndStoreDiscordMessage(msg);
       }
     } catch (err) {
       console.error(`Failed to sync channel ${channelId}:`, err);
@@ -245,7 +240,7 @@ async function syncMissingMessages() {
   console.log('✅ Police Sync Bot: Synchronization complete.');
 }
 
-// Event Listeners
+// Event Handlers & Reconnect Logic
 client.on('ready', async () => {
   console.log(`🚔 Police Sync Bot Logged in as ${client.user?.tag}`);
   await syncMissingMessages();
@@ -253,56 +248,15 @@ client.on('ready', async () => {
 
 client.on('messageCreate', async (msg) => {
   if (msg.author.bot && msg.author.id === client.user?.id) return;
-
-  let type = 'general';
-  if (msg.channelId === DUTY_CHANNEL_ID) {
-    type = 'duty';
-    await parseAndStoreDutyLog(msg);
-  } else if (msg.channelId === CASE_CHANNEL_ID) {
-    type = 'case';
-    await parseAndStoreCaseLog(msg);
-  } else if (msg.channelId === ANNOUNCEMENT_CHANNEL_ID) {
-    type = 'announcement';
-    await query(
-      'INSERT INTO announcements (title, message, type) VALUES (?, ?, ?)',
-      [msg.embeds[0]?.title || 'Discord Announcement', msg.content || msg.embeds[0]?.description || '', 'announcement']
-    );
-  } else if (msg.channelId === SYSTEM_CHANNEL_ID) {
-    type = 'system';
-  }
-
-  await storeDiscordLog(msg, type);
+  await processAndStoreDiscordMessage(msg);
 });
 
-client.on('messageUpdate', async (oldMsg, newMsg) => {
-  const msg = newMsg.partial ? await newMsg.fetch() : newMsg;
-  await storeDiscordLog(msg as Message, 'message_update');
+client.on('error', (err) => {
+  console.error('Discord client error:', err);
 });
 
-client.on('messageDelete', async (msg) => {
-  if (msg.id) {
-    await storeDiscordLog(msg as Message, 'message_delete');
-  }
-});
-
-client.on('guildMemberUpdate', async (oldMember, newMember) => {
-  try {
-    const user = await queryOne('SELECT * FROM users WHERE discord_id = ?', [newMember.id]);
-    if (user) {
-      const topRole = newMember.roles.highest.name;
-      await query('UPDATE users SET rank = ? WHERE discord_id = ?', [topRole, newMember.id]);
-    }
-  } catch (err) {
-    console.error('guildMemberUpdate sync error:', err);
-  }
-});
-
-client.on('guildMemberRemove', async (member) => {
-  try {
-    await query('UPDATE users SET active = 0 WHERE discord_id = ?', [member.id]);
-  } catch (err) {
-    console.error('guildMemberRemove sync error:', err);
-  }
+client.on('shardDisconnect', (event) => {
+  console.warn('Discord bot disconnected, attempt auto-reconnect...', event);
 });
 
 if (BOT_TOKEN) {

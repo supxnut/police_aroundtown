@@ -32,7 +32,7 @@ export const dutyModel = {
     `);
   },
 
-  async getSummaryStats(): Promise<{ todayHours: number; weekHours: number; totalHours: number }> {
+  async getSummaryStats(): Promise<{ todayHours: number; weekHours: number; monthHours: number; totalHours: number }> {
     const todayStr = new Date().toISOString().split('T')[0];
     const now = new Date();
     const day = now.getDay();
@@ -41,17 +41,22 @@ export const dutyModel = {
     startOfWeek.setHours(0, 0, 0, 0);
     const startOfWeekStr = startOfWeek.toISOString().split('T')[0];
 
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+    const startOfMonthStr = startOfMonth.toISOString().split('T')[0];
+
     const res = await queryOne(`
       SELECT 
         SUM(CASE WHEN date = ? OR DATE(date) = ? THEN hours ELSE 0 END) as todayHours,
         SUM(CASE WHEN date >= ? OR DATE(date) >= ? THEN hours ELSE 0 END) as weekHours,
+        SUM(CASE WHEN date >= ? OR DATE(date) >= ? THEN hours ELSE 0 END) as monthHours,
         SUM(hours) as totalHours
       FROM duty_logs
-    `, [todayStr, todayStr, startOfWeekStr, startOfWeekStr]);
+    `, [todayStr, todayStr, startOfWeekStr, startOfWeekStr, startOfMonthStr, startOfMonthStr]);
 
     return {
       todayHours: res && res.todayHours ? Math.round(parseFloat(res.todayHours) * 10) / 10 : 0,
       weekHours: res && res.weekHours ? Math.round(parseFloat(res.weekHours) * 10) / 10 : 0,
+      monthHours: res && res.monthHours ? Math.round(parseFloat(res.monthHours) * 10) / 10 : 0,
       totalHours: res && res.totalHours ? Math.round(parseFloat(res.totalHours) * 10) / 10 : 0,
     };
   },
