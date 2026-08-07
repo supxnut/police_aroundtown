@@ -23,6 +23,9 @@ import realtimeRoutes from './routes/realtimeRoutes';
 export const createApp = () => {
   const app = express();
 
+  // Trust proxy for reverse proxies (e.g. Nginx, Cloud Run, Cloudflare)
+  app.set('trust proxy', 1);
+
   app.use(cors({
     origin: true,
     credentials: true

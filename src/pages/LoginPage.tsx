@@ -1,15 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertOctagon, KeyRound, Lock, LogIn, UserX } from 'lucide-react';
+import { AlertOctagon, Lock, UserX } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import api from '../api/axios';
 
 export const LoginPage: React.FC = () => {
-  const { user, isAdmin, loading: authLoading, loginWithDiscordId } = useAuth();
+  const { user, isAdmin, loading: authLoading, checkAuth } = useAuth();
   const navigate = useNavigate();
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [discordIdInput, setDiscordIdInput] = useState('');
   const [hasUsers, setHasUsers] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -34,30 +33,34 @@ export const LoginPage: React.FC = () => {
       }
     };
     checkSystemStatus();
-  }, []);
 
-  const handleLoginSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const cleanId = discordIdInput.trim();
-    if (!cleanId) {
-      setError('กรุณากรอก Discord ID เพื่อเข้าสู่ระบบ');
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    const result = await loginWithDiscordId(cleanId);
-    setLoading(false);
-
-    if (result.success) {
-      if (result.isAdmin) {
-        navigate('/admin/dashboard', { replace: true });
-      } else {
-        navigate('/police/dashboard', { replace: true });
+    // Listen for OAuth success message from popup window if opened via OAuth redirect
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data && event.data.type === 'DISCORD_AUTH_SUCCESS' && event.data.token) {
+        localStorage.setItem('auth_token', event.data.token);
+        checkAuth();
       }
-    } else {
-      setError(result.message || 'คุณไม่มีสิทธิ์ในการเข้าถึงระบบนี้ (ไม่พบ Discord ID ในระบบ)');
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, [checkAuth]);
+
+  const handleDiscordOAuthLogin = async () => {
+    try {
+      setLoading(true);
+      setError(null);
+      const res = await api.get('/auth/discord/url');
+      if (res.data && res.data.success && res.data.url) {
+        window.location.href = res.data.url;
+      } else if (res.data && !res.data.configured) {
+        setError('ยังไม่ได้ตั้งค่า DISCORD_CLIENT_ID และ DISCORD_CLIENT_SECRET ในไฟล์ระบบ');
+      } else {
+        setError(res.data.message || 'ไม่สามารถเชื่อมต่อ Discord OAuth2 ได้ในขณะนี้');
+      }
+    } catch (err: any) {
+      setError(err.response?.data?.message || 'เกิดข้อผิดพลาดในการเชื่อมต่อ Discord OAuth2');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -90,7 +93,7 @@ export const LoginPage: React.FC = () => {
             <div>
               <p className="font-bold text-amber-200">ยังไม่มีเจ้าหน้าที่ในระบบ</p>
               <p className="mt-0.5 text-amber-300/90 leading-relaxed">
-                ยังไม่มีเจ้าหน้าที่ในระบบ กรุณาเพิ่มเจ้าหน้าที่ก่อนใช้งาน
+                ยังไม่มีเจ้าหน้าที่ในระบบ กรุณาติดต่อผู้ดูแลระบบเพื่อเพิ่มข้อมูลเจ้าหน้าที่
               </p>
             </div>
           </div>
@@ -100,7 +103,7 @@ export const LoginPage: React.FC = () => {
         <div className="p-3.5 rounded-xl bg-rose-950/30 border border-rose-500/30 text-xs text-slate-200 flex items-start space-x-3">
           <Lock className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
           <p className="text-[11px] leading-relaxed text-slate-200">
-            ระบบตรวจสอบสิทธิ์ด้วย <strong className="text-rose-300">Discord ID</strong> กรุณากรอก Discord ID ของเจ้าหน้าที่เพื่อเข้าใช้งานระบบ
+            ระบบตรวจสอบสิทธิ์ด้วย <strong className="text-rose-300">Discord OAuth2</strong> กรุณาเข้าสู่ระบบเพื่อยืนยันตัวตนเจ้าหน้าที่
           </p>
         </div>
 
@@ -115,38 +118,25 @@ export const LoginPage: React.FC = () => {
           </div>
         )}
 
-        {/* Main Discord ID Form */}
-        <form onSubmit={handleLoginSubmit} className="space-y-4">
-          <div className="space-y-1.5">
-            <label className="block text-xs font-bold text-slate-300 flex items-center justify-between">
-              <span>Discord ID ของเจ้าหน้าที่:</span>
-              <span className="text-[10px] text-slate-400 font-mono">18 หลัก</span>
-            </label>
-            <div className="relative flex items-center">
-              <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 pointer-events-none" />
-              <input
-                type="text"
-                value={discordIdInput}
-                onChange={(e) => setDiscordIdInput(e.target.value)}
-                placeholder="กรอก Discord ID ของคุณ..."
-                required
-                className="w-full bg-slate-950 border border-slate-700 focus:border-rose-500 rounded-xl py-3 pl-10 pr-3 text-xs text-slate-100 placeholder-slate-400 font-mono focus:outline-none transition-colors"
-              />
-            </div>
-          </div>
-
+        {/* Discord OAuth2 Button */}
+        <div className="space-y-4 pt-2">
           <button
-            type="submit"
-            disabled={loading || !discordIdInput.trim()}
-            className="w-full py-3.5 px-6 rounded-xl bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white font-extrabold text-xs transition-all duration-200 shadow-lg shadow-rose-600/30 flex items-center justify-center space-x-2 disabled:opacity-50"
+            type="button"
+            onClick={handleDiscordOAuthLogin}
+            disabled={loading}
+            className="w-full py-3.5 px-6 rounded-xl bg-[#5865F2] hover:bg-[#4752C4] text-white font-extrabold text-xs transition-all duration-200 shadow-lg shadow-[#5865F2]/30 flex items-center justify-center space-x-3 group disabled:opacity-50 cursor-pointer"
           >
-            <LogIn className="w-4 h-4" />
-            <span>{loading ? 'กำลังตรวจสอบสิทธิ์...' : 'เข้าสู่ระบบ MDT'}</span>
+            <svg className="w-5 h-5 fill-current text-white group-hover:scale-110 transition-transform" viewBox="0 0 127.14 96.36">
+              <path d="M107.7,8.07A105.15,105.15,0,0,0,81.47,0a72.06,72.06,0,0,0-3.36,6.83A97.68,97.68,0,0,0,49,6.83,72.37,72.37,0,0,0,45.64,0,105.89,105.89,0,0,0,19.39,8.09C2.79,32.65-1.71,56.6.54,80.21A105.73,105.73,0,0,0,32.71,96.36,77.7,77.7,0,0,0,39.6,85.25a68.42,68.42,0,0,1-10.85-5.18c.91-.66,1.8-1.34,2.66-2a74.57,74.57,0,0,0,64.3,0c.87.68,1.76,1.36,2.66,2a68.68,68.68,0,0,1-10.87,5.19,77,77,0,0,0,6.89,11.1,105.25,105.25,0,0,0,32.19-16.14c2.64-27.38-4.51-51.11-18.83-72.15ZM42.45,65.69C36.18,65.69,31,60,31,53s5-12.74,11.43-12.74S54,45.91,53.89,53,48.84,65.69,42.45,65.69Zm42.24,0C78.41,65.69,73.25,60,73.25,53s5-12.74,11.44-12.74S96.23,45.91,96.12,53,91.08,65.69,84.69,65.69Z"/>
+            </svg>
+            <span>{loading ? 'กำลังเชื่อมต่อ Discord...' : 'Login with Discord'}</span>
           </button>
-        </form>
+        </div>
       </div>
     </div>
   );
 };
+
+
 
 

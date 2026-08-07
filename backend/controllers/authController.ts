@@ -4,11 +4,35 @@ import { AuthRequest } from '../middleware/auth';
 import { config } from '../config/config';
 import { userModel } from '../models/userModel';
 
+const getAppUrl = (req: Request): string => {
+  if (process.env.APP_URL) {
+    return process.env.APP_URL.replace(/\/$/, '');
+  }
+  const protocol = req.headers['x-forwarded-proto'] || req.protocol;
+  const host = req.get('host');
+  return `${protocol}://${host}`;
+};
+
+const getRedirectUri = (req: Request): string => {
+  if (process.env.DISCORD_REDIRECT_URI) {
+    return process.env.DISCORD_REDIRECT_URI;
+  }
+  const appUrl = getAppUrl(req);
+  return `${appUrl}/api/auth/discord/callback`;
+};
+
+const isSecureConnection = (req: Request): boolean => {
+  if (process.env.NODE_ENV === 'production') return true;
+  const appUrl = getAppUrl(req);
+  return appUrl.startsWith('https://');
+};
+
 export const authController = {
   async getDiscordOAuthUrl(req: Request, res: Response) {
-    const clientId = process.env.DISCORD_CLIENT_ID;
-    const appUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
-    const redirectUri = `${appUrl}/api/auth/discord/oauth-redirect`;
+    const clientId = process.env.DISCORD_CLIENT_ID || config.discord.clientId;
+    const redirectUri = getRedirectUri(req);
+
+    console.log(`[Discord OAuth] Requesting OAuth URL - Client ID: ${clientId ? 'Present' : 'Missing'}, Redirect URI: ${redirectUri}`);
 
     if (!clientId) {
       return res.json({
@@ -33,21 +57,25 @@ export const authController = {
     });
   },
 
-  async discordOAuthRedirect(req: Request, res: Response) {
+  async handleOAuthCodeExchange(req: Request, res: Response) {
     try {
-      const code = req.query.code as string;
+      const code = (req.query.code || req.body.code) as string;
+      console.log(`[Discord OAuth Callback] Processing callback, received code: ${code ? 'Yes' : 'No'}`);
+
       if (!code) {
         return res.status(400).send('<h1>ไม่พบ OAuth Code จาก Discord</h1>');
       }
 
-      const clientId = process.env.DISCORD_CLIENT_ID;
-      const clientSecret = process.env.DISCORD_CLIENT_SECRET;
-      const appUrl = process.env.APP_URL || `${req.protocol}://${req.get('host')}`;
-      const redirectUri = `${appUrl}/api/auth/discord/oauth-redirect`;
+      const clientId = process.env.DISCORD_CLIENT_ID || config.discord.clientId;
+      const clientSecret = process.env.DISCORD_CLIENT_SECRET || config.discord.clientSecret;
+      const redirectUri = getRedirectUri(req);
 
       if (!clientId || !clientSecret) {
-        return res.status(500).send('<h1>ยังไม่ได้ตั้งค่า DISCORD_CLIENT_ID หรือ DISCORD_CLIENT_SECRET</h1>');
+        console.error('[Discord OAuth Callback] Missing DISCORD_CLIENT_ID or DISCORD_CLIENT_SECRET');
+        return res.status(500).send('<h1>ยังไม่ได้ตั้งค่า DISCORD_CLIENT_ID หรือ DISCORD_CLIENT_SECRET ในระบบ</h1>');
       }
+
+      console.log(`[Discord OAuth Callback] Exchanging code for token with Redirect URI: ${redirectUri}`);
 
       // Exchange code for token
       const tokenResponse = await fetch('https://discord.com/api/v10/oauth2/token', {
@@ -66,8 +94,11 @@ export const authController = {
 
       const tokenData = await tokenResponse.json();
       if (!tokenData.access_token) {
-        return res.status(400).send(`<h1>การแลก Token ไม่สำเร็จ: ${tokenData.error_description || 'Unknown error'}</h1>`);
+        console.error('[Discord OAuth Callback] Token exchange failed:', tokenData);
+        return res.status(400).send(`<h1>การแลก Token ไม่สำเร็จ: ${tokenData.error_description || tokenData.error || 'Unknown error'}</h1>`);
       }
+
+      console.log('[Discord OAuth Callback] Token exchange successful, fetching user profile...');
 
       // Fetch user profile from Discord
       const userResponse = await fetch('https://discord.com/api/v10/users/@me', {
@@ -78,8 +109,11 @@ export const authController = {
 
       const discordUser = await userResponse.json();
       if (!discordUser.id) {
+        console.error('[Discord OAuth Callback] Failed to fetch Discord user:', discordUser);
         return res.status(400).send('<h1>ไม่สามารถดึงข้อมูล Discord User ได้</h1>');
       }
+
+      console.log(`[Discord OAuth Callback] Discord user retrieved: ${discordUser.username} (${discordUser.id})`);
 
       const avatarUrl = discordUser.avatar
         ? `https://cdn.discordapp.com/avatars/${discordUser.id}/${discordUser.avatar}.png`
@@ -87,14 +121,19 @@ export const authController = {
 
       const username = discordUser.global_name || discordUser.username;
 
-      const { token, isAdmin } = await authService.handleDiscordLogin(discordUser.id, username, avatarUrl);
+      const { token, user, isAdmin } = await authService.handleDiscordLogin(discordUser.id, username, avatarUrl);
+
+      const secureCookie = isSecureConnection(req);
+      console.log(`[Discord Session] Creating session cookie for user ${user.fullname}, secure=${secureCookie}`);
 
       res.cookie('token', token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure: secureCookie,
         sameSite: 'lax',
         maxAge: 7 * 24 * 60 * 60 * 1000,
       });
+
+      const redirectPath = isAdmin ? '/admin/dashboard' : '/police/dashboard';
 
       // Send HTML script to set token in localStorage and redirect
       return res.send(`
@@ -115,29 +154,43 @@ export const authController = {
                 window.opener.postMessage({ type: 'DISCORD_AUTH_SUCCESS', token: '${token}' }, '*');
                 window.close();
               } else {
-                window.location.href = '${isAdmin ? '/admin/dashboard' : '/police/dashboard'}';
+                window.location.href = '${redirectPath}';
               }
             </script>
           </body>
         </html>
       `);
     } catch (error: any) {
+      console.error('[Discord OAuth Callback Exception]:', error);
       return res.status(500).send(`<h1>เกิดข้อผิดพลาดในการเข้าสู่ระบบ: ${error.message}</h1>`);
     }
   },
 
+  async discordOAuthRedirect(req: Request, res: Response) {
+    return authController.handleOAuthCodeExchange(req, res);
+  },
+
   async discordCallback(req: Request, res: Response) {
+    // If request contains query param 'code', it's the OAuth callback from Discord redirect
+    if (req.query.code || (req.body && req.body.code)) {
+      return authController.handleOAuthCodeExchange(req, res);
+    }
+
     try {
       const { discord_id, username, avatar } = req.body;
       if (!discord_id) {
         return res.status(400).json({ success: false, message: 'กรุณากรอก Discord ID' });
       }
 
+      console.log(`[Discord Direct Login] Processing login for Discord ID: ${discord_id}`);
+
       const { token, user, isAdmin } = await authService.handleDiscordLogin(discord_id, username, avatar);
+
+      const secureCookie = isSecureConnection(req);
 
       res.cookie('token', token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure: secureCookie,
         sameSite: 'lax',
         maxAge: 7 * 24 * 60 * 60 * 1000,
       });
@@ -149,6 +202,7 @@ export const authController = {
         isAdmin,
       });
     } catch (error: any) {
+      console.error('[Discord Direct Login Error]:', error.message);
       return res.status(401).json({
         success: false,
         message: error.message || 'คุณไม่มีสิทธิ์เข้าถึงระบบนี้',

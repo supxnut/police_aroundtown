@@ -6,9 +6,9 @@ export const config = {
   jwtSecret: process.env.JWT_SECRET || 'police_mdt_super_secret_jwt_key_2026_fivem',
   sessionSecret: process.env.SESSION_SECRET || 'police_mdt_session_secret_2026',
   discord: {
-    clientId: process.env.DISCORD_CLIENT_ID || '123456789012345678',
+    clientId: process.env.DISCORD_CLIENT_ID || '',
     clientSecret: process.env.DISCORD_CLIENT_SECRET || '',
-    redirectUri: process.env.DISCORD_REDIRECT_URI || 'http://localhost:3000/api/auth/discord/callback',
+    redirectUri: process.env.DISCORD_REDIRECT_URI || '',
   },
   adminDiscordIds: (process.env.DISCORD_ADMIN_IDS || '100000000000000001,100000000000000002')
     .split(',')

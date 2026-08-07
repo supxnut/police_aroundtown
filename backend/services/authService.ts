@@ -4,17 +4,20 @@ import { userModel, UserRow } from '../models/userModel';
 
 export const authService = {
   async handleDiscordLogin(discordId: string, username?: string, avatar?: string): Promise<{ token: string; user: UserRow; isAdmin: boolean }> {
+    console.log(`[Auth Service] Verifying authorization for Discord ID: ${discordId}`);
     let user = await userModel.findByDiscordId(discordId);
 
     const isAdmin = config.adminDiscordIds.includes(discordId);
 
     // If user does not exist in database and is not in admin env list, reject login
     if (!user && !isAdmin) {
+      console.warn(`[Auth Service] Authorization failed: Discord ID ${discordId} not found in database and not in DISCORD_ADMIN_IDS`);
       throw new Error('คุณไม่มีสิทธิ์ในการเข้าถึงระบบนี้ (You do not have permission to access this system.)');
     }
 
     // If user does not exist in database but is listed in admin env list, create admin record
     if (!user && isAdmin) {
+      console.log(`[Auth Service] Auto-creating admin user record for Discord ID: ${discordId}`);
       const today = new Date().toISOString().split('T')[0];
       const avatarUrl = avatar || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150';
 
@@ -34,11 +37,19 @@ export const authService = {
       throw new Error('คุณไม่มีสิทธิ์ในการเข้าถึงระบบนี้ (You do not have permission to access this system.)');
     }
 
+    // If user exists and avatar is provided via Discord OAuth, update avatar
+    if (user && avatar && user.avatar !== avatar) {
+      await userModel.update(user.id, { avatar });
+      user.avatar = avatar;
+    }
+
     if (!user.active) {
+      console.warn(`[Auth Service] Login blocked: User ${user.fullname} (${discordId}) is inactive`);
       throw new Error('บัญชีของคุณถูกระงับการใช้งาน กรุณาติดต่อผู้บังคับบัญชา');
     }
 
     const isUserAdmin = isAdmin || user.rank === 'Chief of Police';
+    console.log(`[Auth Service] Login authorized for ${user.fullname} (${user.discord_id}), isAdmin: ${isUserAdmin}`);
 
     const payload = {
       id: user.id,
