@@ -45,12 +45,6 @@ export const OfficerPerformanceCard: React.FC<OfficerPerformanceCardProps> = ({
 
         <div className="text-right">
           <span className="text-2xl font-black text-rose-400">{totalCases}</span>
-          <span className="block text-[10px] uppercase font-bold text-slate-400">จำนวนคดี (ทั้งหมด)</span>
-          <div className="flex items-center space-x-2 text-[10px] font-semibold text-slate-400 justify-end mt-0.5">
-            <span className="text-emerald-300">ลงเอง {totalSelfCases ?? totalCases}</span>
-            <span>•</span>
-            <span className="text-indigo-300">ช่วย {totalHelperCases}</span>
-          </div>
         </div>
       </div>
 
