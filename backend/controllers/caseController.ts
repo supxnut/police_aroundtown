@@ -4,10 +4,12 @@ import { caseModel } from '../models/caseModel';
 import { logAdminAction } from '../services/logService';
 import { DutyValidationService } from '../services/dutyValidationService';
 import { realtimeService } from '../services/realtimeService';
+import { syncDiscordCases } from '../../discordLogSync.server';
 
 export const caseController = {
   async getAllCases(req: Request, res: Response) {
     try {
+      await syncDiscordCases();
       const authReq = req as AuthRequest;
       const queryDiscordId = (req.query.discordId as string) || (req.query.officerDiscordId as string) || '';
       const requireAll = req.query.all === 'true';

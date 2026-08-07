@@ -86,8 +86,8 @@ export const CasesCard: React.FC<CasesCardProps> = ({ cases, totalCount }) => {
                 className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800/80 hover:border-slate-700 transition-colors shadow-sm"
               >
                 <div className="flex flex-col md:flex-row gap-4">
-                  {/* Column Left (70% Desktop, Top Mobile) */}
-                  <div className="w-full md:w-[70%] space-y-2.5">
+                  {/* Column Left */}
+                  <div className={`w-full ${hasImage ? 'md:w-[70%]' : 'md:w-full'} space-y-2.5`}>
                     {/* Top Row: Case ID, Type, Date */}
                     <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-900 pb-2">
                       <div className="flex items-center space-x-2">
@@ -155,9 +155,9 @@ export const CasesCard: React.FC<CasesCardProps> = ({ cases, totalCount }) => {
                     )}
                   </div>
 
-                  {/* Column Right (30% Desktop, Bottom Mobile) */}
-                  <div className="w-full md:w-[30%] flex-shrink-0 flex flex-col justify-center">
-                    {hasImage ? (
+                  {/* Column Right (Only if image exists) */}
+                  {hasImage && (
+                    <div className="w-full md:w-[30%] flex-shrink-0 flex flex-col justify-center">
                       <div
                         onClick={() => setSelectedImage(c.image!)}
                         className="group relative w-full aspect-[4/3] cursor-pointer overflow-hidden rounded-[12px] border border-slate-800 hover:border-indigo-500/50 transition-all shadow-md"
@@ -175,13 +175,8 @@ export const CasesCard: React.FC<CasesCardProps> = ({ cases, totalCount }) => {
                           <span>คลิกเพื่อดูภาพเต็ม</span>
                         </div>
                       </div>
-                    ) : (
-                      <div className="w-full aspect-[4/3] bg-slate-900/60 rounded-[12px] border border-dashed border-slate-800 flex flex-col items-center justify-center text-slate-500 gap-1.5 p-2 text-center">
-                        <ImageIcon className="w-6 h-6 text-slate-600" />
-                        <span className="text-[11px] text-slate-500 font-medium">ไม่มีรูปหลักฐาน</span>
-                      </div>
-                    )}
-                  </div>
+                    </div>
+                  )}
                 </div>
               </div>
             );

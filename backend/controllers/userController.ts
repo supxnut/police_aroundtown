@@ -3,10 +3,12 @@ import { AuthRequest } from '../middleware/auth';
 import { userModel } from '../models/userModel';
 import { dutyModel } from '../models/dutyModel';
 import { logAdminAction } from '../services/logService';
+import { syncDiscordCases } from '../../discordLogSync.server';
 
 export const userController = {
   async getAllUsers(req: AuthRequest, res: Response) {
     try {
+      await syncDiscordCases();
       const users = await userModel.getAll();
       return res.json({ success: true, users });
     } catch (error: any) {

@@ -4,10 +4,12 @@ import { dutyModel } from '../models/dutyModel';
 import { userModel } from '../models/userModel';
 import { caseModel } from '../models/caseModel';
 import { activityModel } from '../models/activityModel';
+import { syncDiscordCases } from '../../discordLogSync.server';
 
 export const dashboardController = {
   async getOfficerDashboard(req: Request, res: Response) {
     try {
+      await syncDiscordCases();
       const discordId = req.params.discordId || (req.query.discordId as string) || '';
       const filterType = (req.query.filterType || req.query.dateFilter || 'all') as any;
       const startDate = req.query.startDate as string;
@@ -61,6 +63,7 @@ export const dashboardController = {
 
   async getDashboardData(req: Request, res: Response) {
     try {
+      await syncDiscordCases();
       const dutyStats = await dutyModel.getSummaryStats();
       const officerCount = await userModel.countAll();
       const caseCount = await caseModel.getCount();

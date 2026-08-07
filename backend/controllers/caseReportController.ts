@@ -1,10 +1,12 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { caseReportModel } from '../models/caseReportModel';
+import { syncDiscordCases } from '../../discordLogSync.server';
 
 export const caseReportController = {
   async getCaseReport(req: AuthRequest, res: Response) {
     try {
+      await syncDiscordCases();
       const { range, search, page, limit } = req.query;
 
       const reportData = await caseReportModel.getReport({
