@@ -55,6 +55,8 @@ export interface OfficerStatsSummary {
   officerName: string;
   breakdown: OfficerTypeStat[];
   totalAllCases: number;
+  totalSelfCases?: number;
+  totalHelperCases?: number;
 }
 
 async function getUserMap(): Promise<Map<string, { fullname: string; avatar: string }>> {
@@ -487,8 +489,8 @@ export const caseModel = {
     if (officerIdVal) {
       try {
         await query(
-          `UPDATE users SET total_cases = (SELECT COUNT(*) FROM cases WHERE officer_discord_id = ? OR helpers LIKE ?) WHERE discord_id = ?`,
-          [officerIdVal, `%${officerIdVal}%`, officerIdVal]
+          `UPDATE users SET total_cases = (SELECT COUNT(*) FROM cases WHERE officer_discord_id = ?) WHERE discord_id = ?`,
+          [officerIdVal, officerIdVal]
         );
       } catch (_) {}
     }
@@ -627,7 +629,8 @@ export const caseModel = {
     };
 
     const userSnowflake = extractSnowflake(officerDiscordId);
-    let totalAllCases = 0;
+    let totalSelfCases = 0;
+    let totalHelperCases = 0;
 
     filteredCases.forEach((c) => {
       const rawType = (c.case_type || c.type || '').toLowerCase().trim();
@@ -664,10 +667,10 @@ export const caseModel = {
 
       if (isPrimary) {
         typeStatsMap[normType].selfCount += 1;
-        totalAllCases += 1;
+        totalSelfCases += 1;
       } else if (isHelper) {
         typeStatsMap[normType].helperCount += 1;
-        totalAllCases += 1;
+        totalHelperCases += 1;
       }
     });
 
@@ -677,7 +680,7 @@ export const caseModel = {
         type,
         selfCount: stat.selfCount,
         helperCount: stat.helperCount,
-        totalCount: stat.selfCount + stat.helperCount,
+        totalCount: stat.selfCount, // Count from Officer Cases ONLY
       };
     });
 
@@ -685,7 +688,9 @@ export const caseModel = {
       officerId: officerDiscordId,
       officerName: officerName || officerDiscordId,
       breakdown,
-      totalAllCases,
+      totalAllCases: totalSelfCases, // Count from Officer Cases ONLY
+      totalSelfCases,
+      totalHelperCases,
     };
   }
 };

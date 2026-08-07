@@ -15,7 +15,10 @@ import {
   Shield,
   Layers,
   Plus,
-  Trash2
+  Trash2,
+  X,
+  ShieldCheck,
+  Tag
 } from 'lucide-react';
 import api from '../../api/axios';
 import { Badge } from '../common/Badge';
@@ -65,6 +68,63 @@ export const CaseReportTab: React.FC<CaseReportTabProps> = ({ onOpenCreateCase }
   const [stats, setStats] = useState<StatsData>({ todayCount: 0, weekCount: 0, totalCount: 0 });
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+
+  // Selected Officer Modal State
+  const [selectedOfficer, setSelectedOfficer] = useState<{ name: string; discordId: string } | null>(null);
+  const [officerModalLoading, setOfficerModalLoading] = useState(false);
+  const [officerCasesList, setOfficerCasesList] = useState<any[]>([]);
+  const [helperCasesList, setHelperCasesList] = useState<any[]>([]);
+
+  // Fetch Officer Cases Breakdown when selectedOfficer changes
+  useEffect(() => {
+    if (!selectedOfficer || !selectedOfficer.discordId) return;
+
+    const fetchOfficerCases = async () => {
+      try {
+        setOfficerModalLoading(true);
+        const res = await api.get('/cases', { params: { discordId: selectedOfficer.discordId } });
+        if (res.data && res.data.success) {
+          const allCases: any[] = res.data.cases || [];
+
+          const extractSnowflake = (str?: string) => {
+            const match = (str || '').match(/\d{17,20}/);
+            return match ? match[0] : '';
+          };
+
+          const targetSnowflake = extractSnowflake(selectedOfficer.discordId);
+
+          const primary = allCases.filter((c) => {
+            const rawOfficer = c.officer_discord_id || c.officerDiscordId || c.officerId || c.officer_in_charge || '';
+            const officerSnowflake = extractSnowflake(rawOfficer);
+            return officerSnowflake === targetSnowflake;
+          });
+
+          const assisting = allCases.filter((c) => {
+            const rawOfficer = c.officer_discord_id || c.officerDiscordId || c.officerId || c.officer_in_charge || '';
+            const officerSnowflake = extractSnowflake(rawOfficer);
+            if (officerSnowflake === targetSnowflake) return false;
+
+            let helperStr = '';
+            if (typeof c.helpers === 'string') helperStr += ' ' + c.helpers;
+            else if (Array.isArray(c.helpers)) helperStr += ' ' + JSON.stringify(c.helpers);
+            if (c.assistant_officer) helperStr += ' ' + c.assistant_officer;
+
+            const helperMatches = Array.from(helperStr.matchAll(/\d{17,20}/g)).map((m) => m[0]);
+            return helperMatches.includes(targetSnowflake);
+          });
+
+          setOfficerCasesList(primary);
+          setHelperCasesList(assisting);
+        }
+      } catch (err) {
+        toast.error('ไม่สามารถดึงข้อมูลรายงานคดีของเจ้าหน้าที่ได้');
+      } finally {
+        setOfficerModalLoading(false);
+      }
+    };
+
+    fetchOfficerCases();
+  }, [selectedOfficer]);
 
   // Fetch Report Data from Backend API
   const fetchReport = useCallback(async () => {
@@ -369,7 +429,15 @@ export const CaseReportTab: React.FC<CaseReportTabProps> = ({ onOpenCreateCase }
                         )}
                       </div>
                     </td>
-                    <td className="px-3 py-3 font-bold text-slate-200">{c.officer_in_charge}</td>
+                    <td className="px-3 py-3 font-bold text-slate-200">
+                      <button
+                        onClick={() => setSelectedOfficer({ name: c.officer_in_charge, discordId: c.discord_id })}
+                        className="hover:text-amber-400 underline decoration-dashed transition-colors text-left font-bold"
+                        title="คลิกเพื่อดูรายงานคดีของเจ้าหน้าที่นี้"
+                      >
+                        {c.officer_in_charge}
+                      </button>
+                    </td>
                     <td className="px-3 py-3 font-medium text-slate-300">{c.assistant_officer}</td>
                     <td className="px-3 py-3 font-mono text-xs text-rose-300/90 font-semibold">{c.discord_id}</td>
                     <td className="px-3 py-3">
@@ -439,6 +507,117 @@ export const CaseReportTab: React.FC<CaseReportTabProps> = ({ onOpenCreateCase }
           </div>
         </div>
       </div>
+
+      {/* Officer Cases Modal (Separate Officer Cases vs Helper Cases) */}
+      {selectedOfficer && (
+        <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-slate-900 border border-slate-800 rounded-2xl max-w-4xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in-95">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-950/50">
+              <div className="flex items-center space-x-3">
+                <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-400">
+                  <Shield className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-100 flex items-center space-x-2">
+                    <span>รายงานคดีเจ้าหน้าที่: {selectedOfficer.name}</span>
+                  </h3>
+                  <p className="text-xs text-slate-400 font-mono">Discord ID: {selectedOfficer.discordId}</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedOfficer(null)}
+                className="p-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-slate-100 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto space-y-6">
+              {officerModalLoading ? (
+                <div className="text-center py-12 text-slate-400 text-sm">กำลังโหลดข้อมูลคดี...</div>
+              ) : (
+                <>
+                  {/* Section 1: Officer Cases (รับผิดชอบคดี) */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <h4 className="text-sm font-extrabold text-rose-400 flex items-center space-x-2">
+                        <ShieldCheck className="w-4 h-4" />
+                        <span>1. รับผิดชอบคดี (Officer Cases)</span>
+                      </h4>
+                      <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                        {officerCasesList.length} คดี
+                      </span>
+                    </div>
+
+                    {officerCasesList.length === 0 ? (
+                      <div className="p-4 rounded-xl bg-slate-950/50 border border-slate-800 text-center text-xs text-slate-500">
+                        ไม่มีคดีที่เป็นผู้รับผิดชอบหลัก
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {officerCasesList.map((c) => (
+                          <div key={c.id} className="p-3.5 rounded-xl bg-slate-950 border border-slate-800/80 flex items-center justify-between text-xs">
+                            <div className="space-y-0.5">
+                              <div>
+                                <span className="font-mono text-indigo-400 font-extrabold mr-2">#{c.case_number || c.caseId || c.id}</span>
+                                <span className="font-extrabold text-slate-100">{c.title}</span>
+                              </div>
+                              <div className="text-[11px] text-slate-400">วันที่: {c.created_at || c.createdAt || c.date}</div>
+                            </div>
+                            <span className="px-2.5 py-1 rounded text-[10px] font-extrabold bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                              {c.case_type || c.type || 'คดีปกติ'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Section 2: Helper Cases (ช่วยปฏิบัติ) */}
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                      <h4 className="text-sm font-extrabold text-indigo-400 flex items-center space-x-2">
+                        <Tag className="w-4 h-4" />
+                        <span>2. ช่วยปฏิบัติ (Helper Cases)</span>
+                      </h4>
+                      <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                        {helperCasesList.length} คดี
+                      </span>
+                    </div>
+
+                    {helperCasesList.length === 0 ? (
+                      <div className="p-4 rounded-xl bg-slate-950/50 border border-slate-800 text-center text-xs text-slate-500">
+                        ไม่มีคดีที่เข้าร่วมช่วยปฏิบัติ
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {helperCasesList.map((c) => (
+                          <div key={c.id} className="p-3.5 rounded-xl bg-slate-950 border border-slate-800/80 flex items-center justify-between text-xs">
+                            <div className="space-y-0.5">
+                              <div>
+                                <span className="font-mono text-indigo-400 font-extrabold mr-2">#{c.case_number || c.caseId || c.id}</span>
+                                <span className="font-extrabold text-slate-100">{c.title}</span>
+                              </div>
+                              <div className="text-[11px] text-slate-400">
+                                ผู้รับผิดชอบหลัก: {c.officer_in_charge || c.officerName || 'ไม่ระบุ'} | วันที่: {c.created_at || c.createdAt || c.date}
+                              </div>
+                            </div>
+                            <span className="px-2.5 py-1 rounded text-[10px] font-extrabold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+                              {c.case_type || c.type || 'คดีปกติ'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

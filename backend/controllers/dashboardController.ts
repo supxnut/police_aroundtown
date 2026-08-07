@@ -38,9 +38,12 @@ export const dashboardController = {
           avatar: dbUser.avatar,
         } : null,
         totalCases: summary.totalAllCases,
+        totalHelperCases: summary.totalHelperCases || 0,
         breakdown: summary.breakdown,
         summary: {
           totalAllCases: summary.totalAllCases,
+          totalSelfCases: summary.totalSelfCases || summary.totalAllCases,
+          totalHelperCases: summary.totalHelperCases || 0,
           totalDbCases: caseCount,
         },
         duty_hours: {

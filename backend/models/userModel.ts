@@ -31,10 +31,9 @@ export const userModel = {
         ), 0) + COALESCE(u.total_hours, 0) AS total_hours,
         COALESCE((
           SELECT COUNT(*) FROM cases c 
-          WHERE LOWER(c.officer_in_charge) = LOWER(u.fullname) 
-             OR LOWER(COALESCE(c.assistant_officer, '')) = LOWER(u.fullname) 
-             OR c.officer_discord_id = u.discord_id
-        ), 0) + COALESCE(u.total_cases, 0) AS total_cases
+          WHERE c.officer_discord_id = u.discord_id
+             OR (c.officer_discord_id = '' AND LOWER(c.officer_in_charge) = LOWER(u.fullname))
+        ), 0) AS total_cases
       FROM users u
       ORDER BY 
         CASE u.rank

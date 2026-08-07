@@ -94,7 +94,44 @@ export const PoliceDashboard: React.FC = () => {
   const filteredCases = useMemo(() => cases.filter((c) => isDateInFilter(c.created_at || c.createdAt || c.date)), [cases, filterType, startDate, endDate]);
 
   const totalFilteredHours = useMemo(() => filteredDutyLogs.reduce((acc, l) => acc + (parseFloat(l.hours as any) || 0), 0), [filteredDutyLogs]);
-  const totalFilteredCases = filteredCases.length;
+
+  const extractSnowflake = (str?: string) => {
+    const match = (str || '').match(/\d{17,20}/);
+    return match ? match[0] : '';
+  };
+
+  const userSnowflake = useMemo(() => extractSnowflake(user?.discord_id), [user?.discord_id]);
+
+  // 1. Officer Cases (c.officerId === user.discordId) - ONLY primary officer!
+  const officerCases = useMemo(() => {
+    if (!userSnowflake) return [];
+    return filteredCases.filter((c) => {
+      const rawOfficer = c.officer_discord_id || c.officerDiscordId || c.officerId || c.officer_in_charge || '';
+      const officerSnowflake = extractSnowflake(rawOfficer);
+      return officerSnowflake === userSnowflake;
+    });
+  }, [filteredCases, userSnowflake]);
+
+  // 2. Helper Cases (c.helpers.includes(user.discordId)) - ONLY helper cases!
+  const helperCases = useMemo(() => {
+    if (!userSnowflake) return [];
+    return filteredCases.filter((c) => {
+      const rawOfficer = c.officer_discord_id || c.officerDiscordId || c.officerId || c.officer_in_charge || '';
+      const officerSnowflake = extractSnowflake(rawOfficer);
+      if (officerSnowflake === userSnowflake) return false;
+
+      let helperStr = '';
+      if (typeof c.helpers === 'string') helperStr += ' ' + c.helpers;
+      else if (Array.isArray(c.helpers)) helperStr += ' ' + JSON.stringify(c.helpers);
+      if (c.assistant_officer) helperStr += ' ' + c.assistant_officer;
+
+      const helperMatches = Array.from(helperStr.matchAll(/\d{17,20}/g)).map((m) => m[0]);
+      return helperMatches.includes(userSnowflake);
+    });
+  }, [filteredCases, userSnowflake]);
+
+  const totalFilteredCases = officerCases.length; // Count from Officer Cases ONLY!
+  const totalHelperCases = helperCases.length;
 
   // Calculate qualified workdays (Days where total duty hours >= 3)
   const totalQualifiedWorkDays = useMemo(() => {
@@ -110,7 +147,7 @@ export const PoliceDashboard: React.FC = () => {
 
   // Calculate Officer Summary Performance Breakdown (normal, take2, red, raid)
   const officerPerformanceStats = useMemo(() => {
-    if (!user) return { breakdown: [], totalCases: 0 };
+    if (!user) return { breakdown: [], totalCases: 0, totalHelperCases: 0 };
 
     const map: Record<string, { selfCount: number; helperCount: number }> = {
       normal: { selfCount: 0, helperCount: 0 },
@@ -119,64 +156,39 @@ export const PoliceDashboard: React.FC = () => {
       raid: { selfCount: 0, helperCount: 0 },
     };
 
-    const extractSnowflake = (str?: string) => {
-      const match = (str || '').match(/\d{17,20}/);
-      return match ? match[0] : '';
+    const categorizeType = (c: Case) => {
+      const rawType = (c.type || c.case_type || '').toLowerCase().trim();
+      if (rawType === 'take2' || rawType.includes('take2')) return 'take2';
+      if (rawType === 'red' || rawType.includes('ส้ม') || rawType.includes('red') || rawType.includes('orange')) return 'red';
+      if (rawType === 'raid' || rawType.includes('จัดร้าน') || rawType.includes('shop') || rawType.includes('raid')) return 'raid';
+      return 'normal';
     };
 
-    const userSnowflake = extractSnowflake(user.discord_id);
-    let totalCasesCount = 0;
+    // Officer Summary: officerCases ONLY
+    officerCases.forEach((c) => {
+      const normType = categorizeType(c);
+      map[normType].selfCount += 1;
+    });
 
-    filteredCases.forEach((c) => {
-      const rawType = (c.type || c.case_type || '').toLowerCase().trim();
-      let normType = 'normal';
-      if (rawType === 'take2' || rawType.includes('take2')) normType = 'take2';
-      else if (rawType === 'red' || rawType.includes('ส้ม') || rawType.includes('red') || rawType.includes('orange')) normType = 'red';
-      else if (rawType === 'raid' || rawType.includes('จัดร้าน') || rawType.includes('shop') || rawType.includes('raid')) normType = 'raid';
-      else normType = 'normal';
-
-      if (!map[normType]) {
-        map[normType] = { selfCount: 0, helperCount: 0 };
-      }
-
-      const rawOfficer = c.officer_discord_id || c.officerDiscordId || c.officerId || c.officer_in_charge || '';
-      const officerSnowflake = extractSnowflake(rawOfficer);
-      const isPrimary = Boolean(userSnowflake && officerSnowflake && officerSnowflake === userSnowflake);
-
-      // Check helper (ถูกแท็ก) strictly by Discord Snowflake ID
-      let isHelper = false;
-      if (!isPrimary && userSnowflake) {
-        let helperStr = '';
-        if (typeof c.helpers === 'string') {
-          helperStr += ' ' + c.helpers;
-        } else if (Array.isArray(c.helpers)) {
-          helperStr += ' ' + JSON.stringify(c.helpers);
-        }
-        if (c.assistant_officer) {
-          helperStr += ' ' + c.assistant_officer;
-        }
-        const helperMatches = Array.from(helperStr.matchAll(/\d{17,20}/g)).map((m) => m[0]);
-        isHelper = helperMatches.includes(userSnowflake);
-      }
-
-      if (isPrimary) {
-        map[normType].selfCount += 1;
-        totalCasesCount += 1;
-      } else if (isHelper) {
-        map[normType].helperCount += 1;
-        totalCasesCount += 1;
-      }
+    // Helper Summary: helperCases ONLY
+    helperCases.forEach((c) => {
+      const normType = categorizeType(c);
+      map[normType].helperCount += 1;
     });
 
     const breakdown: OfficerTypeStat[] = Object.keys(map).map((type) => ({
       type,
       selfCount: map[type].selfCount,
       helperCount: map[type].helperCount,
-      totalCount: map[type].selfCount + map[type].helperCount,
+      totalCount: map[type].selfCount, // Count from Officer Cases ONLY!
     }));
 
-    return { breakdown, totalCases: totalCasesCount };
-  }, [filteredCases, user]);
+    return {
+      breakdown,
+      totalCases: officerCases.length, // Count from Officer Cases ONLY!
+      totalHelperCases: helperCases.length,
+    };
+  }, [officerCases, helperCases, user]);
 
   const filterTypeLabel = useMemo(() => {
     switch (filterType) {
@@ -310,6 +322,7 @@ export const PoliceDashboard: React.FC = () => {
         discordId={user.discord_id}
         breakdown={officerPerformanceStats.breakdown}
         totalCases={officerPerformanceStats.totalCases}
+        totalHelperCases={officerPerformanceStats.totalHelperCases}
         filterLabel={filterTypeLabel}
       />
 

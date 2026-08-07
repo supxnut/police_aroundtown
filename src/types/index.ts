@@ -86,6 +86,8 @@ export interface OfficerStatsSummary {
   officerName: string;
   breakdown: OfficerTypeStat[];
   totalAllCases: number;
+  totalSelfCases?: number;
+  totalHelperCases?: number;
 }
 
 export interface Activity {

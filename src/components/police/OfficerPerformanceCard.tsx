@@ -7,6 +7,7 @@ interface OfficerPerformanceCardProps {
   discordId: string;
   breakdown: OfficerTypeStat[];
   totalCases: number;
+  totalHelperCases?: number;
   filterLabel?: string;
 }
 
@@ -15,6 +16,7 @@ export const OfficerPerformanceCard: React.FC<OfficerPerformanceCardProps> = ({
   discordId,
   breakdown,
   totalCases,
+  totalHelperCases = 0,
   filterLabel = 'ทั้งหมด',
 }) => {
   return (
@@ -41,7 +43,12 @@ export const OfficerPerformanceCard: React.FC<OfficerPerformanceCardProps> = ({
 
         <div className="text-right">
           <span className="text-2xl font-black text-rose-400">{totalCases}</span>
-          <span className="block text-[10px] uppercase font-bold text-slate-400">รวมทั้งหมด</span>
+          <span className="block text-[10px] uppercase font-bold text-slate-400">ลงคดี (รับผิดชอบ)</span>
+          {totalHelperCases > 0 && (
+            <span className="block text-[11px] font-extrabold text-indigo-300 mt-0.5">
+              ช่วยปฏิบัติ {totalHelperCases} คดี
+            </span>
+          )}
         </div>
       </div>
 
@@ -79,7 +86,7 @@ export const OfficerPerformanceCard: React.FC<OfficerPerformanceCardProps> = ({
               <div className="flex items-center justify-between">
                 <span className={`text-xs font-black ${textColor} uppercase tracking-wider`}>{displayTitle}</span>
                 <span className="text-xs font-extrabold text-slate-100 font-mono">
-                  รวม <strong className="text-amber-400">{item.totalCount}</strong> คดี
+                  ลงเอง <strong className="text-amber-400">{item.selfCount}</strong> คดี
                 </span>
               </div>
 
@@ -95,7 +102,7 @@ export const OfficerPerformanceCard: React.FC<OfficerPerformanceCardProps> = ({
                 <div className="flex items-center justify-between bg-slate-950/60 p-1.5 rounded-lg border border-slate-800/60">
                   <span className="text-slate-400 flex items-center space-x-1">
                     <Tag className="w-3 h-3 text-indigo-400" />
-                    <span>ถูกแท็ก:</span>
+                    <span>ช่วยปฏิบัติ:</span>
                   </span>
                   <strong className="text-indigo-300 font-mono font-bold">{item.helperCount}</strong>
                 </div>
@@ -106,13 +113,20 @@ export const OfficerPerformanceCard: React.FC<OfficerPerformanceCardProps> = ({
       </div>
 
       {/* Embed Footer Total Summary */}
-      <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800/80 flex items-center justify-between text-xs pl-3">
+      <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs pl-3">
         <div className="flex items-center space-x-2 text-slate-300 font-bold">
           <CheckCircle className="w-4 h-4 text-emerald-400" />
-          <span>ผลงานปฏิบัติการรวมทั้งหมด</span>
+          <span>ผลงานรับผิดชอบคดีรวม</span>
         </div>
-        <div className="text-base font-black text-rose-400 font-mono">
-          {totalCases} <span className="text-xs text-slate-400 font-normal">คดี</span>
+        <div className="flex items-center space-x-3 text-xs font-mono">
+          <span className="text-base font-black text-rose-400">
+            {totalCases} <span className="text-xs text-slate-400 font-normal">คดี (ลงเอง)</span>
+          </span>
+          {totalHelperCases > 0 && (
+            <span className="text-sm font-black text-indigo-300 border-l border-slate-800 pl-3">
+              {totalHelperCases} <span className="text-xs text-slate-400 font-normal">คดี (ช่วยปฏิบัติ)</span>
+            </span>
+          )}
         </div>
       </div>
     </div>
