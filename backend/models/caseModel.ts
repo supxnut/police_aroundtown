@@ -489,8 +489,8 @@ export const caseModel = {
     if (officerIdVal) {
       try {
         await query(
-          `UPDATE users SET total_cases = (SELECT COUNT(*) FROM cases WHERE officer_discord_id = ?) WHERE discord_id = ?`,
-          [officerIdVal, officerIdVal]
+          `UPDATE users SET total_cases = (SELECT COUNT(*) FROM cases WHERE officer_discord_id = ? OR helpers LIKE ? OR assistant_officer LIKE ?) WHERE discord_id = ?`,
+          [officerIdVal, `%${officerIdVal}%`, `%${officerIdVal}%`, officerIdVal]
         );
       } catch (_) {}
     }
@@ -615,24 +615,26 @@ export const caseModel = {
       return true;
     });
 
-    // Standard case types required by the prompt: normal, take2, red, raid
-    const typeStatsMap: Record<string, { selfCount: number; helperCount: number }> = {
-      normal: { selfCount: 0, helperCount: 0 },
-      take2: { selfCount: 0, helperCount: 0 },
-      red: { selfCount: 0, helperCount: 0 },
-      raid: { selfCount: 0, helperCount: 0 },
-    };
-
     const extractSnowflake = (str?: string) => {
       const match = (str || '').match(/\d{17,20}/);
       return match ? match[0] : '';
     };
 
     const userSnowflake = extractSnowflake(officerDiscordId);
+
+    const typeStatsMap: Record<string, { selfCount: number; helperCount: number; uniqueIds: Set<string> }> = {
+      normal: { selfCount: 0, helperCount: 0, uniqueIds: new Set() },
+      take2: { selfCount: 0, helperCount: 0, uniqueIds: new Set() },
+      red: { selfCount: 0, helperCount: 0, uniqueIds: new Set() },
+      raid: { selfCount: 0, helperCount: 0, uniqueIds: new Set() },
+    };
+
+    const allUniqueCaseIds = new Set<string>();
     let totalSelfCases = 0;
     let totalHelperCases = 0;
 
     filteredCases.forEach((c) => {
+      const caseKey = String(c.id || c.case_number || c.caseId || Math.random());
       const rawType = (c.case_type || c.type || '').toLowerCase().trim();
       let normType = 'normal';
       if (rawType === 'take2' || rawType.includes('take2')) normType = 'take2';
@@ -641,7 +643,7 @@ export const caseModel = {
       else normType = 'normal';
 
       if (!typeStatsMap[normType]) {
-        typeStatsMap[normType] = { selfCount: 0, helperCount: 0 };
+        typeStatsMap[normType] = { selfCount: 0, helperCount: 0, uniqueIds: new Set() };
       }
 
       // Check primary officer (ลงเอง) strictly by Discord Snowflake ID
@@ -649,9 +651,9 @@ export const caseModel = {
       const officerSnowflake = extractSnowflake(rawOfficer);
       const isPrimary = Boolean(userSnowflake && officerSnowflake && officerSnowflake === userSnowflake);
 
-      // Check helper (ถูกแท็ก) strictly by Discord Snowflake ID
+      // Check helper (ถูกแท็ก/ช่วยปฏิบัติ) strictly by Discord Snowflake ID
       let isHelper = false;
-      if (!isPrimary && userSnowflake) {
+      if (userSnowflake) {
         let helperStr = '';
         if (typeof c.helpers === 'string') {
           helperStr += ' ' + c.helpers;
@@ -665,12 +667,18 @@ export const caseModel = {
         isHelper = helperMatches.includes(userSnowflake);
       }
 
-      if (isPrimary) {
-        typeStatsMap[normType].selfCount += 1;
-        totalSelfCases += 1;
-      } else if (isHelper) {
-        typeStatsMap[normType].helperCount += 1;
-        totalHelperCases += 1;
+      if (isPrimary || isHelper) {
+        allUniqueCaseIds.add(caseKey);
+        typeStatsMap[normType].uniqueIds.add(caseKey);
+
+        if (isPrimary) {
+          typeStatsMap[normType].selfCount += 1;
+          totalSelfCases += 1;
+        }
+        if (isHelper) {
+          typeStatsMap[normType].helperCount += 1;
+          totalHelperCases += 1;
+        }
       }
     });
 
@@ -680,7 +688,7 @@ export const caseModel = {
         type,
         selfCount: stat.selfCount,
         helperCount: stat.helperCount,
-        totalCount: stat.selfCount, // Count from Officer Cases ONLY
+        totalCount: stat.uniqueIds.size, // Unique count for this type
       };
     });
 
@@ -688,7 +696,7 @@ export const caseModel = {
       officerId: officerDiscordId,
       officerName: officerName || officerDiscordId,
       breakdown,
-      totalAllCases: totalSelfCases, // Count from Officer Cases ONLY
+      totalAllCases: allUniqueCaseIds.size, // Unique cases total (Officer + Helper deduplicated)
       totalSelfCases,
       totalHelperCases,
     };

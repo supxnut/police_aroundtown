@@ -7,6 +7,7 @@ interface OfficerPerformanceCardProps {
   discordId: string;
   breakdown: OfficerTypeStat[];
   totalCases: number;
+  totalSelfCases?: number;
   totalHelperCases?: number;
   filterLabel?: string;
 }
@@ -16,6 +17,7 @@ export const OfficerPerformanceCard: React.FC<OfficerPerformanceCardProps> = ({
   discordId,
   breakdown,
   totalCases,
+  totalSelfCases,
   totalHelperCases = 0,
   filterLabel = 'ทั้งหมด',
 }) => {
@@ -43,12 +45,12 @@ export const OfficerPerformanceCard: React.FC<OfficerPerformanceCardProps> = ({
 
         <div className="text-right">
           <span className="text-2xl font-black text-rose-400">{totalCases}</span>
-          <span className="block text-[10px] uppercase font-bold text-slate-400">ลงคดี (รับผิดชอบ)</span>
-          {totalHelperCases > 0 && (
-            <span className="block text-[11px] font-extrabold text-indigo-300 mt-0.5">
-              ช่วยปฏิบัติ {totalHelperCases} คดี
-            </span>
-          )}
+          <span className="block text-[10px] uppercase font-bold text-slate-400">จำนวนคดี (ทั้งหมด)</span>
+          <div className="flex items-center space-x-2 text-[10px] font-semibold text-slate-400 justify-end mt-0.5">
+            <span className="text-emerald-300">ลงเอง {totalSelfCases ?? totalCases}</span>
+            <span>•</span>
+            <span className="text-indigo-300">ช่วย {totalHelperCases}</span>
+          </div>
         </div>
       </div>
 
@@ -86,7 +88,7 @@ export const OfficerPerformanceCard: React.FC<OfficerPerformanceCardProps> = ({
               <div className="flex items-center justify-between">
                 <span className={`text-xs font-black ${textColor} uppercase tracking-wider`}>{displayTitle}</span>
                 <span className="text-xs font-extrabold text-slate-100 font-mono">
-                  ลงเอง <strong className="text-amber-400">{item.selfCount}</strong> คดี
+                  รวม <strong className="text-amber-400">{item.totalCount}</strong> คดี
                 </span>
               </div>
 
@@ -116,17 +118,17 @@ export const OfficerPerformanceCard: React.FC<OfficerPerformanceCardProps> = ({
       <div className="bg-slate-950/80 p-3 rounded-xl border border-slate-800/80 flex flex-wrap items-center justify-between gap-2 text-xs pl-3">
         <div className="flex items-center space-x-2 text-slate-300 font-bold">
           <CheckCircle className="w-4 h-4 text-emerald-400" />
-          <span>ผลงานรับผิดชอบคดีรวม</span>
+          <span>ผลงานปฏิบัติการรวมทั้งหมด</span>
         </div>
         <div className="flex items-center space-x-3 text-xs font-mono">
           <span className="text-base font-black text-rose-400">
-            {totalCases} <span className="text-xs text-slate-400 font-normal">คดี (ลงเอง)</span>
+            {totalCases} <span className="text-xs text-slate-400 font-normal">คดี (รวมทั้งหมด)</span>
           </span>
-          {totalHelperCases > 0 && (
-            <span className="text-sm font-black text-indigo-300 border-l border-slate-800 pl-3">
-              {totalHelperCases} <span className="text-xs text-slate-400 font-normal">คดี (ช่วยปฏิบัติ)</span>
-            </span>
-          )}
+          <span className="text-xs text-slate-300 border-l border-slate-800 pl-3 space-x-2">
+            <span>ลงเอง <strong className="text-emerald-400 font-bold">{totalSelfCases ?? totalCases}</strong></span>
+            <span>|</span>
+            <span>ช่วยปฏิบัติ <strong className="text-indigo-300 font-bold">{totalHelperCases}</strong></span>
+          </span>
         </div>
       </div>
     </div>

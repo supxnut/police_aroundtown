@@ -102,7 +102,33 @@ export const PoliceDashboard: React.FC = () => {
 
   const userSnowflake = useMemo(() => extractSnowflake(user?.discord_id), [user?.discord_id]);
 
-  // 1. Officer Cases (c.officerId === user.discordId) - ONLY primary officer!
+  // Unique User Cases Map (Deduplicated union of Officer + Assistant cases)
+  const uniqueUserCasesMap = useMemo(() => {
+    const map = new Map<string, Case>();
+    if (!userSnowflake) return map;
+
+    filteredCases.forEach((c) => {
+      const caseKey = String(c.id || c.case_number || c.caseId || Math.random());
+      const rawOfficer = c.officer_discord_id || c.officerDiscordId || c.officerId || c.officer_in_charge || '';
+      const officerSnowflake = extractSnowflake(rawOfficer);
+      const isPrimary = Boolean(userSnowflake && officerSnowflake && officerSnowflake === userSnowflake);
+
+      let isHelper = false;
+      let helperStr = '';
+      if (typeof c.helpers === 'string') helperStr += ' ' + c.helpers;
+      else if (Array.isArray(c.helpers)) helperStr += ' ' + JSON.stringify(c.helpers);
+      if (c.assistant_officer) helperStr += ' ' + c.assistant_officer;
+      const helperMatches = Array.from(helperStr.matchAll(/\d{17,20}/g)).map((m) => m[0]);
+      isHelper = helperMatches.includes(userSnowflake);
+
+      if (isPrimary || isHelper) {
+        map.set(caseKey, c);
+      }
+    });
+    return map;
+  }, [filteredCases, userSnowflake]);
+
+  // 1. Primary Officer Cases (c.officerId === user.discordId)
   const officerCases = useMemo(() => {
     if (!userSnowflake) return [];
     return filteredCases.filter((c) => {
@@ -112,14 +138,10 @@ export const PoliceDashboard: React.FC = () => {
     });
   }, [filteredCases, userSnowflake]);
 
-  // 2. Helper Cases (c.helpers.includes(user.discordId)) - ONLY helper cases!
+  // 2. Helper Cases (c.helpers.includes(user.discordId) or assistant_officer)
   const helperCases = useMemo(() => {
     if (!userSnowflake) return [];
     return filteredCases.filter((c) => {
-      const rawOfficer = c.officer_discord_id || c.officerDiscordId || c.officerId || c.officer_in_charge || '';
-      const officerSnowflake = extractSnowflake(rawOfficer);
-      if (officerSnowflake === userSnowflake) return false;
-
       let helperStr = '';
       if (typeof c.helpers === 'string') helperStr += ' ' + c.helpers;
       else if (Array.isArray(c.helpers)) helperStr += ' ' + JSON.stringify(c.helpers);
@@ -130,7 +152,7 @@ export const PoliceDashboard: React.FC = () => {
     });
   }, [filteredCases, userSnowflake]);
 
-  const totalFilteredCases = officerCases.length; // Count from Officer Cases ONLY!
+  const totalFilteredCases = uniqueUserCasesMap.size; // Total Unique Cases (ลงเอง + ช่วยปฏิบัติ)
   const totalHelperCases = helperCases.length;
 
   // Calculate qualified workdays (Days where total duty hours >= 3)
@@ -147,13 +169,13 @@ export const PoliceDashboard: React.FC = () => {
 
   // Calculate Officer Summary Performance Breakdown (normal, take2, red, raid)
   const officerPerformanceStats = useMemo(() => {
-    if (!user) return { breakdown: [], totalCases: 0, totalHelperCases: 0 };
+    if (!user) return { breakdown: [], totalCases: 0, totalSelfCases: 0, totalHelperCases: 0 };
 
-    const map: Record<string, { selfCount: number; helperCount: number }> = {
-      normal: { selfCount: 0, helperCount: 0 },
-      take2: { selfCount: 0, helperCount: 0 },
-      red: { selfCount: 0, helperCount: 0 },
-      raid: { selfCount: 0, helperCount: 0 },
+    const map: Record<string, { selfCount: number; helperCount: number; uniqueIds: Set<string> }> = {
+      normal: { selfCount: 0, helperCount: 0, uniqueIds: new Set() },
+      take2: { selfCount: 0, helperCount: 0, uniqueIds: new Set() },
+      red: { selfCount: 0, helperCount: 0, uniqueIds: new Set() },
+      raid: { selfCount: 0, helperCount: 0, uniqueIds: new Set() },
     };
 
     const categorizeType = (c: Case) => {
@@ -164,31 +186,50 @@ export const PoliceDashboard: React.FC = () => {
       return 'normal';
     };
 
-    // Officer Summary: officerCases ONLY
-    officerCases.forEach((c) => {
-      const normType = categorizeType(c);
-      map[normType].selfCount += 1;
-    });
+    const allUniqueCasesMap = new Map<string, Case>();
 
-    // Helper Summary: helperCases ONLY
-    helperCases.forEach((c) => {
-      const normType = categorizeType(c);
-      map[normType].helperCount += 1;
+    filteredCases.forEach((c) => {
+      const caseKey = String(c.id || c.case_number || c.caseId || Math.random());
+      const rawOfficer = c.officer_discord_id || c.officerDiscordId || c.officerId || c.officer_in_charge || '';
+      const officerSnowflake = extractSnowflake(rawOfficer);
+      const isPrimary = Boolean(userSnowflake && officerSnowflake && officerSnowflake === userSnowflake);
+
+      let isHelper = false;
+      if (userSnowflake) {
+        let helperStr = '';
+        if (typeof c.helpers === 'string') helperStr += ' ' + c.helpers;
+        else if (Array.isArray(c.helpers)) helperStr += ' ' + JSON.stringify(c.helpers);
+        if (c.assistant_officer) helperStr += ' ' + c.assistant_officer;
+        const helperMatches = Array.from(helperStr.matchAll(/\d{17,20}/g)).map((m) => m[0]);
+        isHelper = helperMatches.includes(userSnowflake);
+      }
+
+      if (isPrimary || isHelper) {
+        allUniqueCasesMap.set(caseKey, c);
+        const normType = categorizeType(c);
+        if (!map[normType]) {
+          map[normType] = { selfCount: 0, helperCount: 0, uniqueIds: new Set() };
+        }
+        map[normType].uniqueIds.add(caseKey);
+        if (isPrimary) map[normType].selfCount += 1;
+        if (isHelper) map[normType].helperCount += 1;
+      }
     });
 
     const breakdown: OfficerTypeStat[] = Object.keys(map).map((type) => ({
       type,
       selfCount: map[type].selfCount,
       helperCount: map[type].helperCount,
-      totalCount: map[type].selfCount, // Count from Officer Cases ONLY!
+      totalCount: map[type].uniqueIds.size, // Unique count for this type
     }));
 
     return {
       breakdown,
-      totalCases: officerCases.length, // Count from Officer Cases ONLY!
+      totalCases: allUniqueCasesMap.size, // Deduplicated unique cases total
+      totalSelfCases: officerCases.length,
       totalHelperCases: helperCases.length,
     };
-  }, [officerCases, helperCases, user]);
+  }, [filteredCases, userSnowflake, officerCases.length, helperCases.length, user]);
 
   const filterTypeLabel = useMemo(() => {
     switch (filterType) {

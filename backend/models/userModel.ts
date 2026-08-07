@@ -33,6 +33,9 @@ export const userModel = {
           SELECT COUNT(*) FROM cases c 
           WHERE c.officer_discord_id = u.discord_id
              OR (c.officer_discord_id = '' AND LOWER(c.officer_in_charge) = LOWER(u.fullname))
+             OR (u.discord_id != '' AND c.helpers LIKE '%' || u.discord_id || '%')
+             OR (u.discord_id != '' AND c.assistant_officer LIKE '%' || u.discord_id || '%')
+             OR (c.assistant_officer != '' AND LOWER(c.assistant_officer) = LOWER(u.fullname))
         ), 0) AS total_cases
       FROM users u
       ORDER BY 
