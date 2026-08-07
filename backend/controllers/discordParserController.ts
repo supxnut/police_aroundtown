@@ -5,156 +5,65 @@ const systemInstruction = `
 # ROLE
 You are the official backend AI for the Around Town Police MDT System.
 Your purpose is to process Discord Police logs and convert them into structured database records for the Police MDT website.
-You are NOT a chatbot.
-You are NOT an assistant.
-You NEVER answer questions.
-You NEVER explain anything.
-You NEVER summarize.
-You NEVER generate natural language.
+You are NOT a chatbot. You are NOT an assistant. You NEVER answer questions. You NEVER explain anything. You NEVER summarize. You NEVER generate natural language.
 Your only job is parsing Discord logs into structured JSON.
 
 --------------------------------------------------
 
-# INPUT
-The input will always be a Discord message.
-The message may contain:
-• Embed Title
-• Embed Description
-• Embed Fields
-• Attachments
-• Images
-• Mentions
-• Emojis
-• Markdown
-• Plain Text
-• URLs
-• Discord IDs
+# CRITICAL OUTPUT REQUIREMENTS
+• "success" MUST always exist (boolean).
+• "record_type" MUST always exist.
+• Allowed record_type values ONLY (lowercase):
+  - "case"
+  - "duty"
+  - "activity"
+  - "evidence"
+  - "wanted"
+  - "audit"
+  - "other"
+
+Never return "Case", "CASE", "cases", "Case Record", "Duty Log", etc. ALWAYS use lowercase.
+If the title or text contains "บันทึกคดี", record_type MUST be "case".
 
 --------------------------------------------------
 
-# OUTPUT
-Always return ONLY valid JSON.
-Never use markdown.
-Never use \`\`\`json
-Never explain.
-Never include comments.
-Never include extra text.
-Return ONLY one JSON object.
+# DESCRIPTION LINE-BY-LINE PARSING
+Discord Police Log formats often put everything into Embed Description as plain text instead of Embed Fields.
+Extract information line-by-line using these label markers:
+• "ประเภทคดี" → case_type
+• "คนลงคดี" → officer
+• "ผู้ช่วย" → assistant (can be array or string of names/mentions)
+• "เวลา" → timestamp
+• "รูปภาพ" → image
+
+Everything after each label marker up to the next label marker belongs to that field.
 
 --------------------------------------------------
 
-# DETECT RECORD TYPE
-Automatically determine the log type.
-Possible types:
-case, duty, arrest, fine, wanted, activity, evidence, vehicle, weapon, announcement, audit, other
+# DATABASE COMPATIBILITY
+Always include these exact fields in every JSON output even if null:
+• success (boolean)
+• record_type (string, lowercase)
+• case_number (string or null)
+• case_type (string or null)
+• case_title (string or null)
+• officer (string or null)
+• assistant (string or null)
+• suspects (array of strings)
+• description (string or null)
+• status (string or null)
+• timestamp (string or null)
+• image (string or null)
 
---------------------------------------------------
-
-# EXTRACT ALL AVAILABLE DATA
-Extract every possible value.
-
-JSON Schema
-{
-  "success": true,
-  "record_type": "",
-  "case_number": null,
-  "case_type": null,
-  "case_title": null,
-  "officer": null,
-  "assistant": null,
-  "suspects": [],
-  "victims": [],
-  "witnesses": [],
-  "evidence": [],
-  "vehicles": [],
-  "location": null,
-  "description": null,
-  "fine": null,
-  "jail_time": null,
-  "status": null,
-  "timestamp": null,
-  "image": null,
-  "attachments": [],
-  "channel_name": null,
-  "channel_id": null,
-  "message_id": null
-}
-
---------------------------------------------------
-
-# FIELD MAPPING
-ประเภทคดี → case_type
-เลขคดี → case_number
-หัวข้อคดี → case_title
-คนลงคดี → officer
-ผู้ช่วย → assistant
-ผู้ต้องหา → suspects
-ผู้เสียหาย → victims
-พยาน → witnesses
-หลักฐาน → evidence
-รถ → vehicles
-สถานที่ → location
-รายละเอียด → description
-ค่าปรับ → fine
-เวลาจำคุก → jail_time
-สถานะ → status
-เวลา → timestamp
-รูปภาพ → image
+Never omit fields. Never rename fields. Never create new field names.
 
 --------------------------------------------------
 
 # PARSING RULES
-Ignore emojis.
-Ignore markdown.
-Ignore formatting.
-Ignore Discord decorations.
-Ignore role colors.
-Ignore embed styles.
-Ignore separators.
-Preserve Thai text exactly.
-Do not translate.
-Do not invent values.
-Do not guess.
-If a field is missing return null.
-Lists must always be arrays.
-Numbers must be numbers.
-Dates should be converted to ISO8601 whenever possible.
-If conversion is impossible keep the original date text.
-Keep URLs exactly.
-Keep image links exactly.
-Keep attachment links exactly.
-Remove unnecessary whitespace.
-Trim usernames.
-If mentions appear as <@123456789> extract the username if available. Otherwise keep the ID.
-
---------------------------------------------------
-
-# SPECIAL RULES
-If multiple suspects exist store all in suspects array.
-If multiple officers exist store all in officer array.
-If multiple assistants exist store all in assistant array.
-If multiple images exist, first image → image, remaining images → attachments.
-
---------------------------------------------------
-
-# VALIDATION
-Before returning JSON verify:
-Valid JSON
-No missing commas
-No comments
-No markdown
-No explanations
-No extra text
-No hallucination
-
---------------------------------------------------
-
-# FAILURE
-If parsing fails return ONLY
-{
-  "success": false,
-  "error": "Unable to parse Discord log."
-}
+Ignore emojis, markdown, formatting, Discord decorations, role colors, embed styles, separators.
+Preserve Thai text exactly. Do not translate. Do not invent values or guess.
+If a field is missing return null (or [] for arrays).
+Dates should be converted to ISO8601 whenever possible. Keep URLs/images exactly.
 `;
 
 export async function parseDiscordLog(rawLogText: string) {
@@ -182,7 +91,10 @@ export async function parseDiscordLog(rawLogText: string) {
         type: Type.OBJECT,
         properties: {
           success: { type: Type.BOOLEAN },
-          record_type: { type: Type.STRING },
+          record_type: {
+            type: Type.STRING,
+            enum: ['case', 'duty', 'activity', 'evidence', 'wanted', 'audit', 'other'],
+          },
           case_number: { type: Type.STRING },
           case_type: { type: Type.STRING },
           case_title: { type: Type.STRING },
@@ -206,16 +118,80 @@ export async function parseDiscordLog(rawLogText: string) {
           message_id: { type: Type.STRING },
           error: { type: Type.STRING },
         },
+        required: [
+          'success',
+          'record_type',
+          'case_number',
+          'case_type',
+          'case_title',
+          'officer',
+          'assistant',
+          'suspects',
+          'description',
+          'status',
+          'timestamp',
+          'image',
+        ],
       },
     },
   });
 
   const text = response.text ? response.text.trim() : '';
   try {
-    return JSON.parse(text);
+    const parsed = JSON.parse(text);
+    // Normalize record_type strictly to lowercase allowed values
+    if (parsed && typeof parsed === 'object') {
+      parsed.success = typeof parsed.success === 'boolean' ? parsed.success : true;
+      let rt = String(parsed.record_type || 'other').toLowerCase().trim();
+      if (rawLogText.includes('บันทึกคดี')) {
+        rt = 'case';
+      } else if (!['case', 'duty', 'activity', 'evidence', 'wanted', 'audit', 'other'].includes(rt)) {
+        if (rt.includes('case')) rt = 'case';
+        else if (rt.includes('duty')) rt = 'duty';
+        else if (rt.includes('activity')) rt = 'activity';
+        else if (rt.includes('evidence')) rt = 'evidence';
+        else if (rt.includes('wanted')) rt = 'wanted';
+        else if (rt.includes('audit')) rt = 'audit';
+        else rt = 'other';
+      }
+      parsed.record_type = rt;
+
+      // Ensure mandatory fields exist
+      const mandatoryKeys = [
+        'case_number',
+        'case_type',
+        'case_title',
+        'officer',
+        'assistant',
+        'description',
+        'status',
+        'timestamp',
+        'image',
+      ];
+      for (const key of mandatoryKeys) {
+        if (parsed[key] === undefined) {
+          parsed[key] = null;
+        }
+      }
+      if (!Array.isArray(parsed.suspects)) {
+        parsed.suspects = [];
+      }
+    }
+    return parsed;
   } catch (err) {
     return {
       success: false,
+      record_type: 'other',
+      case_number: null,
+      case_type: null,
+      case_title: null,
+      officer: null,
+      assistant: null,
+      suspects: [],
+      description: null,
+      status: null,
+      timestamp: null,
+      image: null,
       error: 'Unable to parse Discord log.',
     };
   }
@@ -228,6 +204,17 @@ export const discordParserController = {
       if (!log_text || typeof log_text !== 'string') {
         return res.status(400).json({
           success: false,
+          record_type: 'other',
+          case_number: null,
+          case_type: null,
+          case_title: null,
+          officer: null,
+          assistant: null,
+          suspects: [],
+          description: null,
+          status: null,
+          timestamp: null,
+          image: null,
           error: 'Please provide valid log_text in request body.',
         });
       }
@@ -237,6 +224,17 @@ export const discordParserController = {
     } catch (error: any) {
       return res.status(500).json({
         success: false,
+        record_type: 'other',
+        case_number: null,
+        case_type: null,
+        case_title: null,
+        officer: null,
+        assistant: null,
+        suspects: [],
+        description: null,
+        status: null,
+        timestamp: null,
+        image: null,
         error: error.message || 'Unable to parse Discord log.',
       });
     }
