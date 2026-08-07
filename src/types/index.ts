@@ -38,11 +38,13 @@ export interface Case {
   title: string;
   type?: string;
   case_type?: string;
+  caseType?: string;
   description: string;
   suspect_name: string;
   officer_in_charge: string;
   officerName?: string;
   officer_discord_id?: string;
+  officerDiscordId?: string;
   officerId?: string;
   officer_avatar?: string;
   officerAvatar?: string;
@@ -51,6 +53,9 @@ export interface Case {
   image?: string;
   discord_message_id?: string;
   discordMessageId?: string;
+  messageId?: string;
+  guild_id?: string;
+  guildId?: string;
   status: 'open' | 'closed' | 'pending';
   date?: string;
   fine?: number;

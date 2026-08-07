@@ -118,8 +118,6 @@ export const PoliceDashboard: React.FC = () => {
     });
 
     const userDiscordId = (user.discord_id || '').trim();
-    const userName = (user.fullname || '').trim().toLowerCase();
-
     let totalCasesCount = 0;
 
     filteredCases.forEach((c) => {
@@ -128,12 +126,10 @@ export const PoliceDashboard: React.FC = () => {
         map[cType] = { selfCount: 0, helperCount: 0 };
       }
 
-      const cOfficerId = (c.officerId || c.officer_discord_id || '').trim();
-      const cOfficerName = (c.officerName || c.officer_in_charge || '').trim().toLowerCase();
+      const cOfficerId = (c.officer_discord_id || c.officerDiscordId || c.officerId || '').trim();
+      const isPrimary = Boolean(userDiscordId && cOfficerId === userDiscordId);
 
-      const isPrimary = (userDiscordId && cOfficerId === userDiscordId) || (userName && cOfficerName.includes(userName));
-
-      // Check if helper
+      // Check if helper (ถูกแท็ก) strictly by Discord Snowflake ID
       let isHelper = false;
       let helpersList: any[] = [];
       if (Array.isArray(c.helpers)) {
@@ -142,25 +138,21 @@ export const PoliceDashboard: React.FC = () => {
         try {
           helpersList = JSON.parse(c.helpers);
         } catch (_) {
-          helpersList = (c.helpers as string).split(',').map((h) => ({ name: h.trim() }));
+          helpersList = (c.helpers as string).split(',').map((h) => ({ id: h.trim(), discord_id: h.trim() }));
         }
       }
 
-      if (helpersList.length > 0) {
+      if (!isPrimary && userDiscordId && helpersList.length > 0) {
         isHelper = helpersList.some((h: any) => {
           if (typeof h === 'string') {
-            return (userDiscordId && h.includes(userDiscordId)) || (userName && h.toLowerCase().includes(userName));
+            return h.trim() === userDiscordId;
           }
           if (typeof h === 'object' && h !== null) {
-            return (
-              (userDiscordId && (h.id === userDiscordId || h.discord_id === userDiscordId)) ||
-              (userName && (h.name || '').toLowerCase().includes(userName))
-            );
+            const hId = (h.discord_id || h.discordId || h.id || '').toString().trim();
+            return hId === userDiscordId;
           }
           return false;
         });
-      } else if (c.assistant_officer && userName) {
-        isHelper = c.assistant_officer.toLowerCase().includes(userName);
       }
 
       if (isPrimary) {

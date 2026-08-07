@@ -163,11 +163,14 @@ export const caseModel = {
     officerId?: string;
     officerDiscordId?: string;
     officer_discord_id?: string;
+    officerUsername?: string;
     officerName?: string;
     officer_in_charge?: string;
     officerAvatar?: string;
     officer_avatar?: string;
     helpers?: any;
+    helperDiscordIds?: string[];
+    helperUsernames?: string[];
     description?: string;
     image?: string;
     discordMessageId?: string;
@@ -179,9 +182,9 @@ export const caseModel = {
     created_at?: string;
   }): Promise<{ id: number; caseData: CaseRow }> {
     const caseIdVal = data.caseId || data.case_number || `CASE-${Date.now()}`;
-    const caseTypeVal = data.type || data.case_type || data.caseType || 'คดีปกติ';
+    const caseTypeVal = data.caseType || data.type || data.case_type || 'คดีปกติ';
     const officerIdVal = data.officerDiscordId || data.officerId || data.officer_discord_id || '';
-    const officerNameVal = data.officerName || data.officer_in_charge || 'ไม่ระบุ';
+    const officerNameVal = data.officerUsername || data.officerName || data.officer_in_charge || 'ไม่ระบุ';
     const officerAvatarVal = data.officerAvatar || data.officer_avatar || '';
     const descriptionVal = data.description || '';
     const imageVal = data.image || '';
@@ -189,22 +192,54 @@ export const caseModel = {
     const guildIdVal = data.guildId || data.guild_id || '';
     const createdAtVal = data.createdAt || data.created_at || new Date().toISOString();
 
-    // Process helpers array
+    // Process helpers array (support helperDiscordIds & helperUsernames arrays or helpers objects)
     let helpersArr: any[] = [];
     if (Array.isArray(data.helpers)) {
-      helpersArr = data.helpers;
+      helpersArr = data.helpers.map((h: any) => {
+        if (typeof h === 'string') {
+          return { discord_id: h, id: h, discordId: h, name: h };
+        }
+        if (typeof h === 'object' && h !== null) {
+          const dId = h.discord_id || h.discordId || h.id || '';
+          const name = h.username || h.name || h.fullname || dId;
+          return { discord_id: dId, id: dId, discordId: dId, name, username: name };
+        }
+        return h;
+      });
+    } else if (Array.isArray(data.helperDiscordIds)) {
+      helpersArr = data.helperDiscordIds.map((id: string, idx: number) => {
+        const username = data.helperUsernames && data.helperUsernames[idx] ? data.helperUsernames[idx] : id;
+        return {
+          discord_id: id,
+          id,
+          discordId: id,
+          name: username,
+          username,
+        };
+      });
     } else if (typeof data.helpers === 'string') {
       try {
-        helpersArr = JSON.parse(data.helpers);
+        const parsed = JSON.parse(data.helpers);
+        if (Array.isArray(parsed)) {
+          helpersArr = parsed.map((h: any) => {
+            if (typeof h === 'string') return { discord_id: h, id: h, discordId: h, name: h };
+            const dId = h.discord_id || h.discordId || h.id || '';
+            const name = h.username || h.name || h.fullname || dId;
+            return { discord_id: dId, id: dId, discordId: dId, name, username: name };
+          });
+        }
       } catch (_) {
         if (data.helpers.trim()) {
-          helpersArr = data.helpers.split(',').map((h: string) => ({ name: h.trim() }));
+          helpersArr = data.helpers.split(',').map((h: string) => {
+            const trimmed = h.trim();
+            return { discord_id: trimmed, id: trimmed, discordId: trimmed, name: trimmed };
+          });
         }
       }
     }
 
     const helpersJson = JSON.stringify(helpersArr);
-    const assistantOfficerStr = helpersArr.map((h: any) => h.name || h.fullname || h.id || String(h)).join(', ') || 'ไม่มี';
+    const assistantOfficerStr = helpersArr.map((h: any) => h.name || h.username || h.discord_id || h.id || String(h)).join(', ') || 'ไม่มี';
     const titleVal = `${caseTypeVal} - ${caseIdVal}`;
 
     // Check if case already exists by discord_message_id or case_number
@@ -412,8 +447,6 @@ export const caseModel = {
     });
 
     const cleanOfficerId = (officerDiscordId || '').trim();
-    const cleanOfficerName = (officerName || '').trim().toLowerCase();
-
     let totalAllCases = 0;
 
     filteredCases.forEach((c) => {
@@ -422,27 +455,23 @@ export const caseModel = {
         typeStatsMap[cType] = { selfCount: 0, helperCount: 0 };
       }
 
-      const isPrimary =
-        (cleanOfficerId && c.officer_discord_id === cleanOfficerId) ||
-        (cleanOfficerName && (c.officer_in_charge || '').toLowerCase().includes(cleanOfficerName));
+      // Check if primary officer (ลงเอง) strictly by Discord Snowflake ID
+      const cOfficerId = (c.officer_discord_id || c.officerDiscordId || c.officerId || '').trim();
+      const isPrimary = Boolean(cleanOfficerId && cOfficerId === cleanOfficerId);
 
-      // Check if helper
+      // Check if helper (ถูกแท็ก) strictly by Discord Snowflake ID
       let isHelper = false;
-      if (Array.isArray(c.helpers)) {
+      if (!isPrimary && cleanOfficerId && Array.isArray(c.helpers)) {
         isHelper = c.helpers.some((h: any) => {
           if (typeof h === 'string') {
-            return (cleanOfficerId && h.includes(cleanOfficerId)) || (cleanOfficerName && h.toLowerCase().includes(cleanOfficerName));
+            return h.trim() === cleanOfficerId;
           }
           if (typeof h === 'object' && h !== null) {
-            return (
-              (cleanOfficerId && (h.id === cleanOfficerId || h.discord_id === cleanOfficerId)) ||
-              (cleanOfficerName && (h.name || '').toLowerCase().includes(cleanOfficerName))
-            );
+            const hId = (h.discord_id || h.discordId || h.id || '').toString().trim();
+            return hId === cleanOfficerId;
           }
           return false;
         });
-      } else if (c.assistant_officer && cleanOfficerName) {
-        isHelper = c.assistant_officer.toLowerCase().includes(cleanOfficerName);
       }
 
       if (isPrimary) {
