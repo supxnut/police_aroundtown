@@ -167,8 +167,6 @@ export const initDB = async (): Promise<void> => {
   const isPgEnv = Boolean(dbUrl.startsWith('postgres') || process.env.PGHOST || process.env.POSTGRES_HOST);
   const isMysqlEnv = Boolean(dbUrl.startsWith('mysql') || process.env.MYSQLHOST || process.env.MYSQL_HOST);
 
-  let connected = false;
-
   if (isPgEnv) {
     try {
       console.log('[Database] Connecting to Persistent PostgreSQL database...');
@@ -187,18 +185,20 @@ export const initDB = async (): Promise<void> => {
       // Test connectivity
       await pgPool.query('SELECT 1');
       dbDriver = 'postgres';
-      connected = true;
-      console.log('[Database] Connected to PostgreSQL database successfully.');
+
+      console.log('\n==========================');
+      console.log('Database Driver : postgres');
+      console.log('Database URL    : Connected');
+      console.log('==========================\n');
     } catch (err: any) {
-      console.warn(`[Database] Could not connect to PostgreSQL (${err.message || err}). Falling back to local database engine.`);
       if (pgPool) {
         try { await pgPool.end(); } catch (_) {}
         pgPool = null;
       }
+      console.error(`[Database] PostgreSQL connection failed: ${err.message || err}`);
+      throw new Error(`DATABASE_URL is configured but PostgreSQL connection failed: ${err.message || err}. PostgreSQL is required and fallback to SQLite is disabled when DATABASE_URL is set.`);
     }
-  }
-
-  if (!connected && isMysqlEnv) {
+  } else if (isMysqlEnv) {
     try {
       console.log('[Database] Connecting to Persistent MySQL database...');
       if (dbUrl) {
@@ -217,15 +217,17 @@ export const initDB = async (): Promise<void> => {
 
       await mysqlPool.query('SELECT 1');
       dbDriver = 'mysql';
-      connected = true;
-      console.log('[Database] Connected to MySQL database successfully.');
-    } catch (err: any) {
-      console.warn(`[Database] Could not connect to MySQL (${err.message || err}). Falling back to local database engine.`);
-      mysqlPool = null;
-    }
-  }
 
-  if (!connected) {
+      console.log('\n==========================');
+      console.log('Database Driver : mysql');
+      console.log('Database URL    : Connected');
+      console.log('==========================\n');
+    } catch (err: any) {
+      mysqlPool = null;
+      console.error(`[Database] MySQL connection failed: ${err.message || err}`);
+      throw new Error(`DATABASE_URL is configured but MySQL connection failed: ${err.message || err}. MySQL is required and fallback to SQLite is disabled when DATABASE_URL is set.`);
+    }
+  } else {
     dbDriver = 'sqlite';
     console.log('[Database] Using Local SQLite engine fallback...');
     const SQL = await initSqlJs();
@@ -233,12 +235,20 @@ export const initDB = async (): Promise<void> => {
       try {
         const fileBuffer = fs.readFileSync(dbPath);
         sqliteDb = new SQL.Database(fileBuffer);
-      } catch (_) {
-        sqliteDb = new SQL.Database();
+        // Quick verification check on SQLite db
+        sqliteDb.exec('PRAGMA user_version;');
+      } catch (err: any) {
+        console.error('[Database] Failed to open SQLite database file:', err.message || err);
+        throw new Error('SQLite database is corrupted. Please configure PostgreSQL or replace the damaged database.');
       }
     } else {
       sqliteDb = new SQL.Database();
     }
+
+    console.log('\n==========================');
+    console.log('Database Driver : sqlite');
+    console.log('Database File   : police_mdt.sqlite');
+    console.log('==========================\n');
   }
 
   await setupTables();
