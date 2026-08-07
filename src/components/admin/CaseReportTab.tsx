@@ -27,6 +27,7 @@ interface CaseReportItem {
   time: string;
   case_number: string;
   title: string;
+  case_type?: string;
   reporter_name: string;
   officer_in_charge: string;
   assistant_officer: string;
@@ -269,7 +270,7 @@ export const CaseReportTab: React.FC<CaseReportTabProps> = ({ onOpenCreateCase }
           <div className="relative flex-1 md:w-72">
             <input
               type="text"
-              placeholder="ค้นหาชื่อเจ้าหน้าที่, Discord ID, เลขคดี, ประเภทคดี..."
+              placeholder="ค้นหาชื่อเจ้าหน้าที่, Discord ID, เลขคดี, ประเภท..."
               value={search}
               onChange={handleSearchChange}
               className="w-full bg-slate-950 border border-slate-800 rounded-lg pl-9 pr-3 py-2 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-rose-500"
@@ -333,9 +334,20 @@ export const CaseReportTab: React.FC<CaseReportTabProps> = ({ onOpenCreateCase }
                   >
                     <td className="px-3 py-3 font-mono font-semibold text-slate-300">{c.date}</td>
                     <td className="px-3 py-3 font-mono text-slate-400">{c.time}</td>
-                    <td className="px-3 py-3 font-bold text-slate-100 max-w-[240px]" title={c.title}>
+                    <td className="px-3 py-3 font-bold text-slate-100 max-w-[240px]">
                       <div className="flex flex-col space-y-1">
-                        <span>{c.title}</span>
+                        <div className="flex items-center space-x-1.5 flex-wrap gap-y-1">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-extrabold border ${
+                            c.case_type === 'Take2' ? 'bg-purple-500/20 text-purple-300 border-purple-500/40' :
+                            c.case_type === 'คดีส้ม-แดงคดี' ? 'bg-orange-500/20 text-orange-400 border-orange-500/40' :
+                            'bg-blue-500/20 text-blue-300 border-blue-500/40'
+                          }`}>
+                            📂 {c.case_type || 'คดีปกติ'}
+                          </span>
+                          {c.title && c.title !== (c.case_type || 'คดีปกติ') && (
+                            <span className="text-xs text-slate-300 font-normal truncate max-w-[150px]">{c.title}</span>
+                          )}
+                        </div>
                         {c.has_alert && (
                           <div>
                             {c.alert_type === 'NO_DUTY_LOG' && (

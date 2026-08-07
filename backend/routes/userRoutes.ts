@@ -8,6 +8,7 @@ const router = Router();
 // All user management routes require admin privileges
 router.use(authenticateToken, requireAdmin);
 
+router.get('/export', userController.exportCsv);
 router.get('/', userController.getAllUsers);
 router.post('/', upload.single('avatar'), userController.createUser);
 router.put('/:id', upload.single('avatar'), userController.updateUser);

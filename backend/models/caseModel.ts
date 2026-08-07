@@ -5,9 +5,11 @@ export interface CaseRow {
   id: number;
   case_number: string;
   title: string;
+  case_type?: string;
   description: string;
   suspect_name: string;
   officer_in_charge: string;
+  assistant_officer?: string;
   officer_discord_id?: string;
   status: 'open' | 'closed' | 'pending';
   created_at?: string;
@@ -46,26 +48,38 @@ export const caseModel = {
     return await queryOne('SELECT * FROM cases WHERE id = ?', [id]);
   },
 
-  async create(data: { case_number: string; title: string; description: string; suspect_name: string; officer_in_charge: string; officer_discord_id?: string; status: string }): Promise<number> {
+  async create(data: { case_number: string; title: string; case_type?: string; description: string; suspect_name: string; officer_in_charge: string; assistant_officer?: string; officer_discord_id?: string; status: string }): Promise<number> {
     const result = await query(
-      'INSERT INTO cases (case_number, title, description, suspect_name, officer_in_charge, officer_discord_id, status) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [data.case_number, data.title, data.description, data.suspect_name, data.officer_in_charge, data.officer_discord_id || '', data.status]
+      'INSERT INTO cases (case_number, title, case_type, description, suspect_name, officer_in_charge, assistant_officer, officer_discord_id, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [
+        data.case_number,
+        data.title,
+        data.case_type || 'คดีปกติ',
+        data.description,
+        data.suspect_name,
+        data.officer_in_charge,
+        data.assistant_officer || 'ไม่มี',
+        data.officer_discord_id || '',
+        data.status
+      ]
     );
     return result.insertId;
   },
 
-  async update(id: number, data: { case_number?: string; title?: string; description?: string; suspect_name?: string; officer_in_charge?: string; officer_discord_id?: string; status?: string }): Promise<boolean> {
+  async update(id: number, data: { case_number?: string; title?: string; case_type?: string; description?: string; suspect_name?: string; officer_in_charge?: string; assistant_officer?: string; officer_discord_id?: string; status?: string }): Promise<boolean> {
     const existing = await this.findById(id);
     if (!existing) return false;
 
     const result = await query(
-      'UPDATE cases SET case_number = ?, title = ?, description = ?, suspect_name = ?, officer_in_charge = ?, officer_discord_id = ?, status = ? WHERE id = ?',
+      'UPDATE cases SET case_number = ?, title = ?, case_type = ?, description = ?, suspect_name = ?, officer_in_charge = ?, assistant_officer = ?, officer_discord_id = ?, status = ? WHERE id = ?',
       [
         data.case_number ?? existing.case_number,
         data.title ?? existing.title,
+        data.case_type ?? existing.case_type ?? 'คดีปกติ',
         data.description ?? existing.description,
         data.suspect_name ?? existing.suspect_name,
         data.officer_in_charge ?? existing.officer_in_charge,
+        data.assistant_officer ?? existing.assistant_officer ?? 'ไม่มี',
         data.officer_discord_id ?? existing.officer_discord_id ?? '',
         data.status ?? existing.status,
         id

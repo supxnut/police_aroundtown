@@ -68,6 +68,44 @@ export const AdminUsersPage: React.FC = () => {
     fetchDutyLogs();
   }, []);
 
+  const handleExportUsersCsv = async () => {
+    try {
+      const response = await api.get('/users/export', { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'officers_list.csv');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success('ดาวน์โหลดรายชื่อเจ้าหน้าที่ CSV สำเร็จ');
+    } catch {
+      try {
+        let csv = 'ID,ชื่อ-นามสกุล,Discord ID,ยศตำแหน่ง,วันที่เริ่มงาน,วันทำงานสะสม (>=3ชม.),ชั่วโมงรวม,เคสรวม,สถานะบัญชี\n';
+        filteredUsers.forEach((u) => {
+          const daysWorked = getUserQualifiedWorkDays(u.id);
+          const statusStr = u.active ? 'ใช้งานปกติ' : 'ระงับสิทธิ์';
+          const cleanName = (u.fullname || '').replace(/"/g, '""');
+          const cleanRank = (u.rank || '').replace(/"/g, '""');
+          csv += `"${u.id}","${cleanName}","${u.discord_id || ''}","${cleanRank}","${u.start_date || ''}","${daysWorked}","${u.total_hours || 0}","${u.total_cases || 0}","${statusStr}"\n`;
+        });
+        const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', 'officers_list.csv');
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+        toast.success('ดาวน์โหลดรายชื่อเจ้าหน้าที่ CSV สำเร็จ');
+      } catch {
+        toast.error('เกิดข้อผิดพลาดในการส่งออกไฟล์ CSV');
+      }
+    }
+  };
+
   // User Handlers
   const handleOpenCreateUser = () => {
     setEditingUser(null);
@@ -252,10 +290,16 @@ export const AdminUsersPage: React.FC = () => {
 
         <div className="flex items-center space-x-2">
           {activeTab === 'users' && (
-            <Button variant="primary" onClick={handleOpenCreateUser}>
-              <UserPlus className="w-4 h-4 mr-2" />
-              <span>ลงทะเบียนเจ้าหน้าที่ใหม่</span>
-            </Button>
+            <>
+              <Button variant="secondary" onClick={handleExportUsersCsv} className="text-xs">
+                <Download className="w-4 h-4 mr-2" />
+                <span>ส่งออก CSV</span>
+              </Button>
+              <Button variant="primary" onClick={handleOpenCreateUser}>
+                <UserPlus className="w-4 h-4 mr-2" />
+                <span>ลงทะเบียนเจ้าหน้าที่ใหม่</span>
+              </Button>
+            </>
           )}
 
           {activeTab === 'duty' && (

@@ -7,6 +7,7 @@ export interface CaseReportRow {
   time: string;
   case_number: string;
   title: string;
+  case_type?: string;
   reporter_name: string;
   officer_in_charge: string;
   assistant_officer: string;
@@ -82,6 +83,7 @@ export const caseReportModel = {
         c.id,
         c.case_number,
         c.title,
+        COALESCE(NULLIF(c.case_type, ''), 'คดีปกติ') as case_type,
         c.description,
         c.suspect_name,
         c.officer_in_charge,
@@ -136,6 +138,7 @@ export const caseReportModel = {
         time: timePart,
         case_number: r.case_number,
         title: r.title,
+        case_type: r.case_type || 'คดีปกติ',
         reporter_name: r.reporter_name || 'ไม่ระบุ',
         officer_in_charge: r.officer_in_charge || 'ไม่ระบุ',
         assistant_officer: r.assistant_officer || 'ไม่มี',

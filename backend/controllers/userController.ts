@@ -1,6 +1,7 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth';
 import { userModel } from '../models/userModel';
+import { dutyModel } from '../models/dutyModel';
 import { logAdminAction } from '../services/logService';
 
 export const userController = {
@@ -99,6 +100,41 @@ export const userController = {
       }
 
       return res.json({ success: true, message: 'User deleted successfully' });
+    } catch (error: any) {
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  },
+
+  async exportCsv(req: AuthRequest, res: Response) {
+    try {
+      const users = await userModel.getAll();
+      const dutyLogs = await dutyModel.getAll();
+
+      // Calculate qualified work days (days with >= 3 hours duty)
+      const userQualifiedDays: Record<number, number> = {};
+      users.forEach(u => {
+        const hoursPerDay: Record<string, number> = {};
+        dutyLogs.filter(l => l.user_id === u.id).forEach(l => {
+          if (!l.date) return;
+          const dateKey = l.date.substring(0, 10);
+          const hrs = parseFloat(l.hours as any) || 0;
+          hoursPerDay[dateKey] = (hoursPerDay[dateKey] || 0) + hrs;
+        });
+        userQualifiedDays[u.id] = Object.values(hoursPerDay).filter(hrs => hrs >= 3).length;
+      });
+
+      let csv = 'ID,ชื่อ-นามสกุล,Discord ID,ยศตำแหน่ง,วันที่เริ่มงาน,วันทำงานสะสม (>=3ชม.),ชั่วโมงรวม,เคสรวม,สถานะบัญชี\n';
+      users.forEach(u => {
+        const daysWorked = userQualifiedDays[u.id] || 0;
+        const statusStr = u.active ? 'ใช้งานปกติ' : 'ระงับสิทธิ์';
+        const cleanName = (u.fullname || '').replace(/"/g, '""');
+        const cleanRank = (u.rank || '').replace(/"/g, '""');
+        csv += `"${u.id}","${cleanName}","${u.discord_id || ''}","${cleanRank}","${u.start_date || ''}","${daysWorked}","${u.total_hours || 0}","${u.total_cases || 0}","${statusStr}"\n`;
+      });
+
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', 'attachment; filename="officers_list.csv"');
+      return res.send('\uFEFF' + csv);
     } catch (error: any) {
       return res.status(500).json({ success: false, message: error.message });
     }

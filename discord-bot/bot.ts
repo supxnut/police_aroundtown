@@ -131,16 +131,21 @@ async function processAndStoreDiscordMessage(msg: Message) {
         }
       }
 
+      const caseType = parsed.case_type || 'คดีปกติ';
+      const assistantText = Array.isArray(parsed.assistant) ? parsed.assistant.join(', ') : (parsed.assistant || 'ไม่มี');
+
       await query(
-        `INSERT INTO cases (case_number, title, description, suspect_name, officer_in_charge, officer_discord_id, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(case_number) DO UPDATE SET title = excluded.title, description = excluded.description, officer_in_charge = excluded.officer_in_charge, officer_discord_id = excluded.officer_discord_id, status = excluded.status`,
+        `INSERT INTO cases (case_number, title, case_type, description, suspect_name, officer_in_charge, assistant_officer, officer_discord_id, status)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(case_number) DO UPDATE SET title = excluded.title, case_type = excluded.case_type, description = excluded.description, officer_in_charge = excluded.officer_in_charge, assistant_officer = excluded.assistant_officer, officer_discord_id = excluded.officer_discord_id, status = excluded.status`,
         [
           caseNumber,
-          parsed.case_title || parsed.case_type || 'Police Case',
+          parsed.case_title || caseType,
+          caseType,
           parsed.description || cleanText,
           Array.isArray(parsed.suspects) && parsed.suspects.length > 0 ? parsed.suspects.join(', ') : 'Unknown',
           parsed.officer || msg.author.username,
+          assistantText,
           msg.author.id,
           parsed.status === 'ปิดคดี' ? 'closed' : 'open'
         ]

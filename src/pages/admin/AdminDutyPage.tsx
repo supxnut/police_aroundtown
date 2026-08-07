@@ -107,6 +107,44 @@ export const AdminDutyPage: React.FC = () => {
     }
   };
 
+  const handleExportUsersCsv = async () => {
+    try {
+      const response = await api.get('/users/export', { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', 'officers_list.csv');
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success('ดาวน์โหลดรายชื่อเจ้าหน้าที่ CSV สำเร็จ');
+    } catch {
+      try {
+        let csv = 'ID,ชื่อ-นามสกุล,Discord ID,ยศตำแหน่ง,วันที่เริ่มงาน,วันทำงานสะสม (>=3ชม.),ชั่วโมงรวม,เคสรวม,สถานะบัญชี\n';
+        filteredUsers.forEach((u) => {
+          const daysWorked = getUserQualifiedWorkDays(u.id);
+          const statusStr = u.active ? 'ใช้งานปกติ' : 'ระงับสิทธิ์';
+          const cleanName = (u.fullname || '').replace(/"/g, '""');
+          const cleanRank = (u.rank || '').replace(/"/g, '""');
+          csv += `"${u.id}","${cleanName}","${u.discord_id || ''}","${cleanRank}","${u.start_date || ''}","${daysWorked}","${u.total_hours || 0}","${u.total_cases || 0}","${statusStr}"\n`;
+        });
+        const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.setAttribute('download', 'officers_list.csv');
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.URL.revokeObjectURL(url);
+        toast.success('ดาวน์โหลดรายชื่อเจ้าหน้าที่ CSV สำเร็จ');
+      } catch {
+        toast.error('เกิดข้อผิดพลาดในการส่งออกไฟล์ CSV');
+      }
+    }
+  };
+
   // User Handlers
   const handleOpenCreateUser = () => {
     setEditingUser(null);
@@ -188,10 +226,31 @@ export const AdminDutyPage: React.FC = () => {
     )
   );
 
+  const todayStr = new Date().toISOString().split('T')[0];
+  const now = new Date();
+  const day = now.getDay(); // 0 = Sunday
+  const diff = now.getDate() - day;
+  const startOfWeek = new Date(now.setDate(diff));
+  startOfWeek.setHours(0, 0, 0, 0);
+
+  const dutyTodayHours = logs
+    .filter((l) => {
+      const logDateStr = l.date ? l.date.substring(0, 10) : '';
+      return logDateStr === todayStr || (l.created_at && l.created_at.startsWith(todayStr));
+    })
+    .reduce((sum, l) => sum + (parseFloat(l.hours as any) || 0), 0);
+
+  const dutyWeekHours = logs
+    .filter((l) => {
+      const logDateStr = l.date ? l.date.substring(0, 10) : '';
+      const logDate = new Date(logDateStr || l.created_at || '');
+      return logDate >= startOfWeek;
+    })
+    .reduce((sum, l) => sum + (parseFloat(l.hours as any) || 0), 0);
+
   const filterDutyByRange = (log: DutyLog) => {
     if (dutyRange === 'all') return true;
 
-    const todayStr = new Date().toISOString().split('T')[0];
     const logDateStr = log.date ? log.date.substring(0, 10) : '';
 
     if (dutyRange === 'today') {
@@ -199,12 +258,6 @@ export const AdminDutyPage: React.FC = () => {
     }
 
     if (dutyRange === 'week') {
-      const now = new Date();
-      const day = now.getDay(); // 0 = Sunday
-      const diff = now.getDate() - day;
-      const startOfWeek = new Date(now.setDate(diff));
-      startOfWeek.setHours(0, 0, 0, 0);
-
       const logDate = new Date(logDateStr || log.created_at || '');
       return logDate >= startOfWeek;
     }
@@ -236,24 +289,23 @@ export const AdminDutyPage: React.FC = () => {
 
         <div className="flex items-center space-x-2">
           {activeTab === 'users' && (
-            <Button variant="primary" onClick={handleOpenCreateUser}>
-              <UserPlus className="w-4 h-4 mr-2" />
-              <span>ลงทะเบียนเจ้าหน้าที่ใหม่</span>
-            </Button>
-          )}
-
-          {activeTab === 'duty' && (
             <>
-              <Button variant="secondary" onClick={handleExportDutyCsv} className="text-xs">
+              <Button variant="secondary" onClick={handleExportUsersCsv} className="text-xs">
                 <Download className="w-4 h-4 mr-2" />
                 <span>ส่งออก CSV</span>
               </Button>
-
-              <Button variant="primary" onClick={handleOpenCreateDuty}>
-                <Plus className="w-4 h-4 mr-2" />
-                <span>เพิ่มบันทึกเวลาเข้าเวร</span>
+              <Button variant="primary" onClick={handleOpenCreateUser}>
+                <UserPlus className="w-4 h-4 mr-2" />
+                <span>ลงทะเบียนเจ้าหน้าที่ใหม่</span>
               </Button>
             </>
+          )}
+
+          {activeTab === 'duty' && (
+            <Button variant="primary" onClick={handleOpenCreateDuty}>
+              <Plus className="w-4 h-4 mr-2" />
+              <span>เพิ่มบันทึกเวลาเข้าเวร</span>
+            </Button>
           )}
 
           {activeTab === 'case-report' && (
@@ -271,8 +323,8 @@ export const AdminDutyPage: React.FC = () => {
           onClick={() => setActiveTab('users')}
           className={`px-4 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-2 ${
             activeTab === 'users'
-              ? 'bg-rose-600/20 text-rose-300 border border-rose-500/40 shadow-md'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+              ? 'bg-rose-600/20 text-rose-300 border border-rose-500/50 shadow-md shadow-rose-600/20 font-extrabold'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900 border border-transparent'
           }`}
         >
           <Users className="w-4 h-4" />
@@ -283,8 +335,8 @@ export const AdminDutyPage: React.FC = () => {
           onClick={() => setActiveTab('duty')}
           className={`px-4 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-2 ${
             activeTab === 'duty'
-              ? 'bg-rose-600/20 text-rose-300 border border-rose-500/40 shadow-md'
-              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+              ? 'bg-rose-600/20 text-rose-300 border border-rose-500/50 shadow-md shadow-rose-600/20 font-extrabold'
+              : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900 border border-transparent'
           }`}
         >
           <Clock className="w-4 h-4" />
@@ -297,8 +349,8 @@ export const AdminDutyPage: React.FC = () => {
             onClick={() => setActiveTab('case-report')}
             className={`px-4 py-2.5 rounded-lg text-xs font-bold transition-all flex items-center space-x-2 ${
               activeTab === 'case-report'
-                ? 'bg-rose-600/20 text-rose-300 border border-rose-500/40 shadow-md'
-                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900'
+                ? 'bg-rose-600/20 text-rose-300 border border-rose-500/50 shadow-md shadow-rose-600/20 font-extrabold'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-slate-900 border border-transparent'
             }`}
           >
             <FileText className="w-4 h-4" />
@@ -419,7 +471,41 @@ export const AdminDutyPage: React.FC = () => {
 
       {/* TAB 2: DUTY SHIFT LOGS */}
       {activeTab === 'duty' && (
-        <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
+        <div className="space-y-6">
+          {/* Stat Cards for Shift Log / Duty */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between shadow-lg relative overflow-hidden group hover:border-slate-700 transition-colors">
+              <div className="space-y-1">
+                <span className="text-xs text-slate-400 font-bold block uppercase tracking-wider">ชม.รวมวันนี้</span>
+                <div className="flex items-baseline space-x-2">
+                  <span className="text-2xl font-black text-rose-400">
+                    {Number(dutyTodayHours.toFixed(2))}
+                  </span>
+                  <span className="text-xs text-slate-500">ชม.</span>
+                </div>
+              </div>
+              <div className="p-3 bg-rose-500/10 border border-rose-500/20 text-rose-400 rounded-xl">
+                <Calendar className="w-6 h-6" />
+              </div>
+            </div>
+
+            <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl flex items-center justify-between shadow-lg relative overflow-hidden group hover:border-slate-700 transition-colors">
+              <div className="space-y-1">
+                <span className="text-xs text-slate-400 font-bold block uppercase tracking-wider">ชม.รวมสัปดาห์นี้</span>
+                <div className="flex items-baseline space-x-2">
+                  <span className="text-2xl font-black text-amber-400">
+                    {Number(dutyWeekHours.toFixed(2))}
+                  </span>
+                  <span className="text-xs text-slate-500">ชม.</span>
+                </div>
+              </div>
+              <div className="p-3 bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-xl">
+                <Clock className="w-6 h-6" />
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden shadow-2xl">
           <div className="p-4 bg-slate-950 border-b border-slate-800 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
             {/* Range Filter Buttons */}
             <div className="flex items-center space-x-1 bg-slate-900 p-1 rounded-lg border border-slate-800 text-xs font-bold">
@@ -530,6 +616,7 @@ export const AdminDutyPage: React.FC = () => {
             </table>
           </div>
         </div>
+      </div>
       )}
 
       {/* TAB 3: CASE REPORT (ADMIN ONLY) */}

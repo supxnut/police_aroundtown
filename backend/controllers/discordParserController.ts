@@ -28,13 +28,18 @@ If the title or text contains "บันทึกคดี", record_type MUST be
 --------------------------------------------------
 
 # DESCRIPTION LINE-BY-LINE PARSING
-Discord Police Log formats often put everything into Embed Description as plain text instead of Embed Fields.
-Extract information line-by-line using these label markers:
-• "ประเภทคดี" → case_type
+Discord Police Log formats put everything into Embed Description as plain text.
+Extract information line-by-line using these exact label markers:
+• "ประเภทคดี" → case_type (MUST be strictly one of: "คดีปกติ", "Take2", or "คดีส้ม-แดงคดี")
 • "คนลงคดี" → officer
 • "ผู้ช่วย" → assistant (can be array or string of names/mentions)
 • "เวลา" → timestamp
 • "รูปภาพ" → image
+
+Allowed case_type values ONLY:
+1. "คดีปกติ"
+2. "Take2"
+3. "คดีส้ม-แดงคดี"
 
 Everything after each label marker up to the next label marker belongs to that field.
 
@@ -155,6 +160,22 @@ export async function parseDiscordLog(rawLogText: string) {
         else rt = 'other';
       }
       parsed.record_type = rt;
+
+      // Normalize case_type for case records strictly to allowed types
+      if (parsed.record_type === 'case') {
+        let ct = String(parsed.case_type || '').trim();
+        if (/take\s*2/i.test(ct) || /take2/i.test(rawLogText)) {
+          ct = 'Take2';
+        } else if (/ส้ม|แดง/i.test(ct) || /ส้ม|แดง/i.test(rawLogText)) {
+          ct = 'คดีส้ม-แดงคดี';
+        } else {
+          ct = 'คดีปกติ';
+        }
+        parsed.case_type = ct;
+        if (!parsed.case_title) {
+          parsed.case_title = ct;
+        }
+      }
 
       // Ensure mandatory fields exist
       const mandatoryKeys = [

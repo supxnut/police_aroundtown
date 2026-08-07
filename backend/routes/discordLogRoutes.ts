@@ -33,12 +33,15 @@ router.post('/log', async (req: Request, res: Response) => {
 
     if (recType === 'case') {
       const caseNumber = parsed.case_number || `CASE-${Date.now().toString().slice(-6)}`;
+      const caseType = parsed.case_type || 'คดีปกติ';
       const id = await caseModel.create({
         case_number: caseNumber,
-        title: parsed.case_title || parsed.case_type || 'Police Case Record',
+        title: parsed.case_title || caseType,
+        case_type: caseType,
         description: parsed.description || '',
         suspect_name: Array.isArray(parsed.suspects) && parsed.suspects.length > 0 ? parsed.suspects.join(', ') : 'Unknown',
         officer_in_charge: parsed.officer || 'Unassigned',
+        assistant_officer: Array.isArray(parsed.assistant) ? parsed.assistant.join(', ') : (parsed.assistant || 'ไม่มี'),
         status: parsed.status === 'ปิดคดี' ? 'closed' : 'open',
       });
       try { await DutyValidationService.validateCaseById(id); } catch (_) {}

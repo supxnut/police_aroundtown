@@ -153,6 +153,7 @@ export const initDB = async (): Promise<void> => {
   try { db.run("ALTER TABLE cases ADD COLUMN closed_time TEXT DEFAULT ''"); } catch (_) {}
   try { db.run("ALTER TABLE cases ADD COLUMN duration TEXT DEFAULT ''"); } catch (_) {}
   try { db.run("ALTER TABLE cases ADD COLUMN assistant_officer TEXT DEFAULT 'ไม่มี'"); } catch (_) {}
+  try { db.run("ALTER TABLE cases ADD COLUMN case_type TEXT DEFAULT 'คดีปกติ'"); } catch (_) {}
 
   // Create activities table
   db.run(`
